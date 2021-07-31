@@ -1,0 +1,45 @@
+{
+  "name": "glitch-db",
+  "version": "0.0.1",
+  "description": "A simple, file based key-value database",
+  "main": "lib/index.js",
+  "types": "./typings/index.d.ts",
+  "type": "commonjs",
+  "files": [
+    "src/**/index.ts",
+    "lib/**/index.js",
+    "lib/**/index.js.map",
+    "typings/**/index.d.ts",
+    "typings/**/index.d.ts.map"
+  ],
+  "engines": {
+    "node": ">=14"
+  },
+  "scripts": {
+    "build": "npx tsc",
+    "test": "npm run build && node lib/test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/subramanian-elavathur/glitch-db.git"
+  },
+  "keywords": [
+    "glitch",
+    "db",
+    "database",
+    "file",
+    "simple",
+    "local"
+  ],
+  "author": "Subramanian Elavathur",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/subramanian-elavathur/glitch-db/issues"
+  },
+  "homepage": "https://github.com/subramanian-elavathur/glitch-db#readme",
+  "devDependencies": {
+    "@types/node": "^16.4.8",
+    "good-vibes": "^0.1.2",
+    "typescript": "^4.3.5"
+  }
+}
