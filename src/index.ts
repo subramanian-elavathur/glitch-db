@@ -1,6 +1,6 @@
 const fs = require("fs/promises");
 
-export class GlitchDB<Type> {
+export default class GlitchDB<Type> {
   #localDir: string;
   #data: {
     [key: string]: Type;

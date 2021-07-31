@@ -2,7 +2,7 @@ const fs = require("fs/promises");
 const path = require("path");
 const os = require("os");
 
-import { GlitchDB } from "./";
+import GlitchDB from "./";
 import run, { before, test, after } from "good-vibes";
 
 const group = "Glitch DB";
