@@ -1,12 +1,13 @@
-const fs = require("fs/promises");
-const path = require("path");
-const os = require("os");
+import * as fs from "fs/promises";
+import * as path from "path";
+import * as os from "os";
+import run, { group } from "good-vibes";
 
 import GlitchDB from "./";
-import run, { before, test, after } from "good-vibes";
 
-const group = "Glitch DB";
 let tempDirectory: string;
+const { before, test, after } = group("Glitch DB");
+
 let glitchDB: GlitchDB<string>;
 
 before(async (done, log) => {
@@ -18,38 +19,20 @@ before(async (done, log) => {
   await glitchDB.set("key-3", "value-3");
   log(`Glitch DB setup with dummy data complete`);
   done();
-}, group);
+});
 
-test(
-  "Test retrieve",
-  async (v) => {
-    v.check("value-1")
-      .equals(await glitchDB.get("key-1"))
-      .done();
-  },
-  group
-);
+test("Test retrieve", async (v) => {
+  v.check("value-1", await glitchDB.get("key-1")).done();
+});
 
-test(
-  "Test exists",
-  async (v) => {
-    v.check(true)
-      .equals(await glitchDB.exists("key-1"))
-      .done();
-  },
-  group
-);
+test("Test exists", async (v) => {
+  v.check(true, await glitchDB.exists("key-1")).done();
+});
 
-test(
-  "Test unset",
-  async (v) => {
-    await glitchDB.unset("key-3");
-    v.check(undefined)
-      .equals(await glitchDB.get("key-3"))
-      .done();
-  },
-  group
-);
+test("Test unset", async (v) => {
+  await glitchDB.unset("key-3");
+  v.check(undefined, await glitchDB.get("key-3")).done();
+});
 
 after(async (done, log) => {
   try {
@@ -62,6 +45,6 @@ after(async (done, log) => {
   } finally {
     tempDirectory = "";
   }
-}, group);
+});
 
 run();
