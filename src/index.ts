@@ -1,15 +1,23 @@
 const fs = require("fs/promises");
 
+export class GlitchMultiDB {
+  #baseDir: string;
+
+  constructor(baseDir: string) {
+    this.#baseDir = baseDir;
+  }
+
+  getDatabase<Type>(name: string): GlitchDB<Type> {
+    return new GlitchDB<Type>(`${this.#baseDir}/${name}`);
+  }
+}
+
 export default class GlitchDB<Type> {
   #localDir: string;
-  #data: {
-    [key: string]: Type;
-  };
   #initComplete: boolean;
 
   constructor(localDir: string) {
     this.#localDir = localDir;
-    this.#data = {};
   }
 
   async #init() {
@@ -75,7 +83,6 @@ export default class GlitchDB<Type> {
 
   async set(key: string, value: Type): Promise<boolean> {
     await this.#init();
-    this.#data[key] = value;
     try {
       await fs.writeFile(this.#getKeyPath(key), JSON.stringify(value));
       return Promise.resolve(true);

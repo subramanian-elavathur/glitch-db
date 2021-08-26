@@ -3,7 +3,7 @@ import * as path from "path";
 import * as os from "os";
 import run, { group } from "good-vibes";
 
-import GlitchDB from "./";
+import GlitchDB, { GlitchMultiDB } from "./";
 
 let tempDirectory: string;
 const { before, test, after } = group("Glitch DB");
@@ -13,7 +13,8 @@ let glitchDB: GlitchDB<string>;
 before(async (done, log) => {
   tempDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "glitch-"));
   log(`Created temp directory for tests at: ${tempDirectory}`);
-  glitchDB = new GlitchDB<string>(tempDirectory);
+  const multiDB = new GlitchMultiDB(tempDirectory);
+  glitchDB = multiDB.getDatabase<string>("master");
   await glitchDB.set("key-1", "value-1");
   await glitchDB.set("key-2", "value-2");
   await glitchDB.set("key-3", "value-3");
