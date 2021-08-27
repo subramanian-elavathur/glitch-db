@@ -3,7 +3,7 @@ import * as path from "path";
 import * as os from "os";
 import run, { group } from "good-vibes";
 
-import GlitchDB, { GlitchMultiDB } from "./";
+import GlitchDB, { AdditionalKeyGenerator, GlitchMultiDB } from "./";
 
 let tempDirectory: string;
 const { before, test, after } = group("Glitch DB");
@@ -11,10 +11,14 @@ const { before, test, after } = group("Glitch DB");
 let glitchDB: GlitchDB<string>;
 
 before(async (done, log) => {
-  tempDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "glitch-"));
+  tempDirectory = path.join(os.tmpdir(), "glitch");
   log(`Created temp directory for tests at: ${tempDirectory}`);
   const multiDB = new GlitchMultiDB(tempDirectory);
-  glitchDB = multiDB.getDatabase<string>("master");
+  const additionalKeyGenerator: AdditionalKeyGenerator<string> = (
+    key,
+    value
+  ) => [`${key}~${value}`, value];
+  glitchDB = multiDB.getDatabase<string>("master", additionalKeyGenerator);
   await glitchDB.set("key-1", "value-1");
   await glitchDB.set("key-2", "value-2");
   await glitchDB.set("key-3", "value-3");
@@ -24,6 +28,12 @@ before(async (done, log) => {
 
 test("Test retrieve", async (v) => {
   v.check("value-1", await glitchDB.get("key-1")).done();
+});
+
+test("Test retrieve using additional keys", async (v) => {
+  v.check("value-2", await glitchDB.get("value-2"))
+    .check("value-2", await glitchDB.get("key-2~value-2"))
+    .done();
 });
 
 test("Test exists", async (v) => {
