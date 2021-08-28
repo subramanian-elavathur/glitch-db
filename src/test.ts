@@ -40,6 +40,16 @@ test("Test exists", async (v) => {
   v.check(true, await glitchDB.exists("key-1")).done();
 });
 
+test("Test reset", async (v) => {
+  await glitchDB.set("key-1", "value-4");
+  v.check("value-4", await glitchDB.get("value-4"))
+    .check("value-4", await glitchDB.get("key-1~value-4"))
+    .check("value-4", await glitchDB.get("key-1"))
+    .check(undefined, await glitchDB.get("value-1"))
+    .check(undefined, await glitchDB.get("key-1~value-1"))
+    .done();
+});
+
 test("Test unset", async (v) => {
   await glitchDB.unset("key-3");
   v.check(undefined, await glitchDB.get("key-3")).done();

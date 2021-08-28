@@ -98,6 +98,10 @@ export default class GlitchDB<Type> {
 
   async set(key: string, value: Type): Promise<boolean> {
     await this.#init();
+    // Removing symlinks before setting them again is important
+    // because they may be generated using the value object
+    // which may have changed later as part of this update instruction
+    await this.unset(key, true);
     const filePath = this.#getKeyPath(key);
     try {
       await fs.writeFile(filePath, JSON.stringify(value));
@@ -122,12 +126,14 @@ export default class GlitchDB<Type> {
     }
   }
 
-  async unset(key: string): Promise<boolean> {
+  async unset(key: string, symlinksOnly?: boolean): Promise<boolean> {
     await this.#init();
     const value = await this.get(key);
     if (value) {
       try {
-        await fs.rm(this.#getKeyPath(key));
+        if (!symlinksOnly) {
+          await fs.rm(this.#getKeyPath(key));
+        }
         // remove symlinks
         try {
           if (this.#additionalKeyGenerator) {
