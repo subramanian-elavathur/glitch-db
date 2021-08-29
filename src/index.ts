@@ -92,8 +92,37 @@ export default class GlitchDB<Type> {
     return Promise.resolve(undefined);
   }
 
+  async keys(includeAdditionalKeys?: boolean): Promise<string[]> {
+    const files = await fs.readdir(this.#localDir);
+    const keys = [];
+    for (const file of files) {
+      if (includeAdditionalKeys) {
+        keys.push(this.#getKeyFromFile(file));
+      } else {
+        const stat = await fs.lstat(`${this.#localDir}/${file}`);
+        if (!stat.isSymbolicLink()) {
+          keys.push(this.#getKeyFromFile(file));
+        }
+      }
+    }
+    return keys;
+  }
+
+  async data(): Promise<{ [key: string]: Type }> {
+    const keys = await this.keys();
+    const data = {};
+    for (const key of keys) {
+      data[key] = await this.get(key);
+    }
+    return data;
+  }
+
   #getKeyPath(key: string): string {
     return `${this.#localDir}/${key}.json`;
+  }
+
+  #getKeyFromFile(fileName: string) {
+    return fileName.replace(".json", "");
   }
 
   async set(key: string, value: Type): Promise<boolean> {
@@ -134,7 +163,6 @@ export default class GlitchDB<Type> {
         if (!symlinksOnly) {
           await fs.rm(this.#getKeyPath(key));
         }
-        // remove symlinks
         try {
           if (this.#additionalKeyGenerator) {
             const keys = this.#additionalKeyGenerator(key, value);

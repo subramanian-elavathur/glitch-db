@@ -39,7 +39,7 @@
   "homepage": "https://github.com/subramanian-elavathur/glitch-db#readme",
   "devDependencies": {
     "@types/node": "^16.7.3",
-    "good-vibes": "^0.11.1",
+    "good-vibes": "^0.12.1",
     "typescript": "^4.3.5"
   }
 }

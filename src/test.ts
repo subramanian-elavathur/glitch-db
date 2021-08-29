@@ -6,7 +6,7 @@ import run, { group } from "good-vibes";
 import GlitchDB, { AdditionalKeyGenerator, GlitchMultiDB } from "./";
 
 let tempDirectory: string;
-const { before, test, after } = group("Glitch DB");
+const { before, test, after, sync } = group("Glitch DB");
 
 let glitchDB: GlitchDB<string>;
 
@@ -26,21 +26,23 @@ before(async (done, log) => {
   done();
 });
 
-test("Test retrieve", async (v) => {
+sync(); // run tests one after the other
+
+test("get api", async (v) => {
   v.check("value-1", await glitchDB.get("key-1")).done();
 });
 
-test("Test retrieve using additional keys", async (v) => {
+test("get api with additional keys", async (v) => {
   v.check("value-2", await glitchDB.get("value-2"))
     .check("value-2", await glitchDB.get("key-2~value-2"))
     .done();
 });
 
-test("Test exists", async (v) => {
+test("exists api", async (v) => {
   v.check(true, await glitchDB.exists("key-1")).done();
 });
 
-test("Test reset", async (v) => {
+test("reset api", async (v) => {
   await glitchDB.set("key-1", "value-4");
   v.check("value-4", await glitchDB.get("value-4"))
     .check("value-4", await glitchDB.get("key-1~value-4"))
@@ -50,9 +52,27 @@ test("Test reset", async (v) => {
     .done();
 });
 
-test("Test unset", async (v) => {
+test("unset api", async (v) => {
   await glitchDB.unset("key-3");
   v.check(undefined, await glitchDB.get("key-3")).done();
+});
+
+test("keys api", async (v) => {
+  v.check(["key-1", "key-2"], await glitchDB.keys()).done();
+});
+
+test("keys api with additional keys", async (v) => {
+  v.check(
+    ["key-1", "key-1~value-4", "key-2", "key-2~value-2", "value-2", "value-4"],
+    await glitchDB.keys(true)
+  ).done();
+});
+
+test("data api", async (v) => {
+  v.check(
+    { "key-1": "value-4", "key-2": "value-2" },
+    await glitchDB.data()
+  ).done();
 });
 
 after(async (done, log) => {
