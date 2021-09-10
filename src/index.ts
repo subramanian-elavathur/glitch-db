@@ -39,14 +39,11 @@ export default class GlitchDB<Type> {
     if (this.#initComplete) {
       return; // no need to re-init
     }
-    console.log(`Checking if specified path ${this.#localDir} exists`);
     let stat;
     try {
       stat = await fs.stat(this.#localDir);
     } catch (e) {
-      console.log(`Directory does not exist - will create`);
       await fs.mkdir(this.#localDir, { recursive: true });
-      console.log(`Directory created, lets go!`);
       this.#initComplete = true;
     }
     if (stat) {
@@ -55,7 +52,6 @@ export default class GlitchDB<Type> {
           `Specified path ${this.#localDir} exists but is not a directory`
         );
       } else {
-        console.log(`Directory already exists, lets go!`);
         this.#initComplete = true;
       }
     }
@@ -73,9 +69,6 @@ export default class GlitchDB<Type> {
     if (stat && stat.isFile()) {
       return Promise.resolve(true);
     } else {
-      console.log(
-        `Key path ${keyPath} is not a file! You may not be able to set a value for this key.`
-      );
       return Promise.resolve(false);
     }
   }
