@@ -86,6 +86,7 @@ export default class GlitchDB<Type> {
   }
 
   async keys(includeAdditionalKeys?: boolean): Promise<string[]> {
+    await this.#init();
     const files = await fs.readdir(this.#localDir);
     const keys = [];
     for (const file of files) {
@@ -102,6 +103,7 @@ export default class GlitchDB<Type> {
   }
 
   async data(): Promise<{ [key: string]: Type }> {
+    await this.#init();
     const keys = await this.keys();
     const data = {};
     for (const key of keys) {
