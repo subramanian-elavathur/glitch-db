@@ -22,10 +22,19 @@ export class GlitchMultiDB {
   }
 }
 
+interface Joiner<Type> {
+  db: GlitchDB<Type>;
+  leftKey: string;
+  rightKey?: string;
+  joinName: string;
+}
 export default class GlitchDB<Type> {
   #localDir: string;
   #initComplete: boolean;
   #additionalKeyGenerator: AdditionalKeyGenerator<Type>;
+  #joins: {
+    [joinName: string]: Joiner<any>;
+  };
 
   constructor(
     localDir: string,
@@ -33,6 +42,7 @@ export default class GlitchDB<Type> {
   ) {
     this.#localDir = localDir;
     this.#additionalKeyGenerator = additionalKeyGenerator;
+    this.#joins = {};
   }
 
   async #init() {
@@ -55,6 +65,51 @@ export default class GlitchDB<Type> {
         this.#initComplete = true;
       }
     }
+  }
+
+  createJoin<TypeRight>( // todo make persistent
+    db: GlitchDB<TypeRight>,
+    joinName: string,
+    leftKey: string,
+    rightKey?: string
+  ): void {
+    if (!db || !joinName || !leftKey) {
+      throw new Error(
+        `'db', 'joinName' and 'leftKey' arguments cannot be falsy`
+      );
+    }
+    this.#joins[joinName] = {
+      db,
+      joinName: joinName,
+      leftKey,
+      rightKey,
+    };
+  }
+
+  async getRelated(key: string): Promise<any> {
+    const leftData = await this.get(key);
+    if (leftData === undefined) {
+      return Promise.resolve(undefined);
+    }
+    if (!Object.keys(this.#joins)?.length) {
+      throw new Error(
+        `No joins defined. Please create a join using 'createJoin' api.`
+      );
+    }
+    let joinedData = {};
+    for (const rightKey of Object.keys(this.#joins)) {
+      const joiner = this.#joins[rightKey];
+      let rightData;
+      if (joiner.rightKey) {
+        rightData = Object.values(await joiner.db.data()).find(
+          (each) => leftData[joiner.leftKey] === each[joiner.rightKey]
+        );
+      } else {
+        rightData = await joiner.db.get(leftData[joiner.leftKey]);
+      }
+      joinedData[joiner.joinName] = rightData;
+    }
+    return Promise.resolve({ ...joinedData, ...leftData });
   }
 
   async exists(key: string): Promise<boolean> {
