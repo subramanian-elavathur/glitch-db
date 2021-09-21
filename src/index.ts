@@ -1,3 +1,4 @@
+import LRUCache = require("lru-cache");
 const fs = require("fs/promises");
 
 export interface AdditionalKeyGenerator<Type> {
@@ -13,11 +14,13 @@ export class GlitchMultiDB {
 
   getDatabase<Type>(
     name: string,
-    additionalKeyGenerator?: AdditionalKeyGenerator<Type>
+    additionalKeyGenerator?: AdditionalKeyGenerator<Type>,
+    cacheSize?: number
   ): GlitchDB<Type> {
     return new GlitchDB<Type>(
       `${this.#baseDir}/${name}`,
-      additionalKeyGenerator
+      additionalKeyGenerator,
+      cacheSize
     );
   }
 }
@@ -35,14 +38,19 @@ export default class GlitchDB<Type> {
   #joins: {
     [joinName: string]: Joiner<any>;
   };
+  #cache: LRUCache<string, Type>;
 
   constructor(
     localDir: string,
-    additionalKeyGenerator?: AdditionalKeyGenerator<Type>
+    additionalKeyGenerator?: AdditionalKeyGenerator<Type>,
+    cacheSize?: number
   ) {
     this.#localDir = localDir;
     this.#additionalKeyGenerator = additionalKeyGenerator;
     this.#joins = {};
+    if (cacheSize > 0) {
+      this.#cache = new LRUCache(cacheSize);
+    }
   }
 
   async #init() {
@@ -87,6 +95,7 @@ export default class GlitchDB<Type> {
   }
 
   async getRelated(key: string): Promise<any> {
+    await this.#init();
     const leftData = await this.get(key);
     if (leftData === undefined) {
       return Promise.resolve(undefined);
@@ -114,6 +123,9 @@ export default class GlitchDB<Type> {
 
   async exists(key: string): Promise<boolean> {
     await this.#init();
+    if (this.#cache?.has(key)) {
+      return Promise.resolve(true);
+    }
     const keyPath = this.#getKeyPath(key);
     let stat;
     try {
@@ -130,12 +142,18 @@ export default class GlitchDB<Type> {
 
   async get(key: string): Promise<Type> {
     await this.#init();
+    const cachedData = this.#cache?.get(key);
+    if (cachedData) {
+      return Promise.resolve(cachedData);
+    }
     const exists = await this.exists(key);
     if (exists) {
       const data = await fs.readFile(this.#getKeyPath(key), {
         encoding: "utf8",
       });
-      return Promise.resolve(JSON.parse(data));
+      const parsed = JSON.parse(data);
+      this.#cache?.set(key, parsed);
+      return Promise.resolve(parsed);
     }
     return Promise.resolve(undefined);
   }
@@ -207,6 +225,9 @@ export default class GlitchDB<Type> {
 
   async unset(key: string, symlinksOnly?: boolean): Promise<boolean> {
     await this.#init();
+    if (this.#cache?.has(key)) {
+      this.#cache?.del(key);
+    }
     const value = await this.get(key);
     if (value) {
       try {
