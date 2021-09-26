@@ -7,7 +7,6 @@ import { group } from "good-vibes";
 import GlitchDB, { GlitchMultiDB } from ".";
 import Context from "good-vibes/typings/Context";
 
-let tempDirectory: string;
 const { before, test, after, sync } = group("Cached");
 
 interface TestData {
@@ -17,7 +16,11 @@ interface TestData {
 
 const CACHE_SIZE = 10000;
 
-let glitchDB: GlitchDB<TestData>;
+let glitchDBWithCache: GlitchDB<TestData>;
+let glitchDBNoCache: GlitchDB<TestData>;
+
+let tempDirectoryWithCache: string;
+let tempDirectoryNoCache: string;
 
 const printMemoryStats = (c: Context): void => {
   c.log(`Memory Stats`);
@@ -27,12 +30,21 @@ const printMemoryStats = (c: Context): void => {
 };
 
 before(async (context) => {
-  tempDirectory = path.join(os.tmpdir(), "glitch-cached");
-  context.log(`Created temp directory for tests at: ${tempDirectory}`);
-  const multiDB = new GlitchMultiDB(tempDirectory);
-  glitchDB = multiDB.getDatabase<TestData>("cached", null, CACHE_SIZE);
+  tempDirectoryWithCache = path.join(os.tmpdir(), "glitch-cached");
+  context.log(`Created temp directory for tests at: ${tempDirectoryWithCache}`);
+  glitchDBWithCache = new GlitchMultiDB(
+    tempDirectoryWithCache
+  ).getDatabase<TestData>("cached", null, CACHE_SIZE);
+
+  tempDirectoryNoCache = path.join(os.tmpdir(), "glitch-no-cache");
+  context.log(`Created temp directory for tests at: ${tempDirectoryNoCache}`);
+  glitchDBNoCache = new GlitchMultiDB(
+    tempDirectoryNoCache
+  ).getDatabase<TestData>("no-cache");
+
   for (let i = 0; i < CACHE_SIZE; i++) {
-    await glitchDB.set(`key-${i}`, { a: `a${i}`, b: i });
+    await glitchDBWithCache.set(`key-${i}`, { a: `a${i}`, b: i });
+    await glitchDBNoCache.set(`key-${i}`, { a: `a${i}`, b: i });
   }
   context.log(`Glitch DB setup complete with ${CACHE_SIZE} keys`);
   printMemoryStats(context);
@@ -43,7 +55,7 @@ sync(); // run tests one after the other
 
 test("without cache", async (c) => {
   for (let i = 0; i < CACHE_SIZE; i++) {
-    c.check({ a: `a${i}`, b: i }, await glitchDB.get(`key-${i}`));
+    c.check({ a: `a${i}`, b: i }, await glitchDBNoCache.get(`key-${i}`));
   }
   c.log("Loaded data into cache");
   printMemoryStats(c);
@@ -52,7 +64,24 @@ test("without cache", async (c) => {
 
 test("with cache", async (c) => {
   for (let i = 0; i < CACHE_SIZE; i++) {
-    c.check({ a: `a${i}`, b: i }, await glitchDB.get(`key-${i}`));
+    c.check({ a: `a${i}`, b: i }, await glitchDBWithCache.get(`key-${i}`));
+  }
+  printMemoryStats(c);
+  c.done();
+});
+
+test("update cache", async (c) => {
+  for (let i = 0; i < CACHE_SIZE; i++) {
+    await glitchDBWithCache.set(`key-${i}`, { a: `b${i}`, b: i + 10 });
+  }
+  c.check("passthrough", "passthrough");
+  printMemoryStats(c);
+  c.done();
+});
+
+test("check updated cache", async (c) => {
+  for (let i = 0; i < CACHE_SIZE; i++) {
+    c.check({ a: `b${i}`, b: i + 10 }, await glitchDBWithCache.get(`key-${i}`));
   }
   printMemoryStats(c);
   c.done();
@@ -60,12 +89,15 @@ test("with cache", async (c) => {
 
 after(async (c) => {
   try {
-    await fs.rmdir(tempDirectory, { recursive: true });
+    await fs.rmdir(tempDirectoryWithCache, { recursive: true });
+    await fs.rmdir(tempDirectoryNoCache, { recursive: true });
     c.log("Deleted temp directory after tests");
   } catch (e) {
-    c.log(`Could not delete temp directory at: ${tempDirectory}`);
+    c.log(`Could not delete temp directory at: ${tempDirectoryWithCache}`);
+    c.log(`Could not delete temp directory at: ${tempDirectoryNoCache}`);
   } finally {
     c.done();
-    tempDirectory = "";
+    tempDirectoryWithCache = "";
+    tempDirectoryNoCache = "";
   }
 });

@@ -202,6 +202,9 @@ export default class GlitchDB<Type> {
     const filePath = this.#getKeyPath(key);
     try {
       await fs.writeFile(filePath, JSON.stringify(value));
+      if (this.#cache) {
+        this.#cache?.set(key, value);
+      }
       // add symlinks
       try {
         if (this.#additionalKeyGenerator) {
