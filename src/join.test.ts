@@ -2,7 +2,7 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import * as os from "os";
 import { group } from "good-vibes";
-import GlitchDB, { GlitchMultiDB } from "./index";
+import GlitchDB, { GlitchPartition } from "./index";
 
 let tempDirectory: string;
 const { before, test, after, sync } = group("joins");
@@ -27,20 +27,20 @@ interface RightTwo {
   year: number;
 }
 
-let leftOne: GlitchDB<LeftOne>;
-let leftTwo: GlitchDB<LeftTwo>;
-let rightOne: GlitchDB<RightOne>;
-let rightTwo: GlitchDB<RightTwo>;
+let leftOne: GlitchPartition<LeftOne>;
+let leftTwo: GlitchPartition<LeftTwo>;
+let rightOne: GlitchPartition<RightOne>;
+let rightTwo: GlitchPartition<RightTwo>;
 
 before(async (context) => {
   tempDirectory = path.join(os.tmpdir(), "glitch-join");
   context.log(`Created temp directory for tests at: ${tempDirectory}`);
 
-  const multiDB = new GlitchMultiDB(tempDirectory);
-  leftOne = multiDB.getDatabase<LeftOne>("leftOne");
-  leftTwo = multiDB.getDatabase<LeftTwo>("leftTwo");
-  rightOne = multiDB.getDatabase<RightOne>("rightOne");
-  rightTwo = multiDB.getDatabase<RightTwo>("rightTwo");
+  const multiDB = new GlitchDB(tempDirectory, 0);
+  leftOne = multiDB.getPartition<LeftOne>("leftOne");
+  leftTwo = multiDB.getPartition<LeftTwo>("leftTwo");
+  rightOne = multiDB.getPartition<RightOne>("rightOne");
+  rightTwo = multiDB.getPartition<RightTwo>("rightTwo");
 
   await leftOne.set("Mozart", {
     book: "Man called Ove",
@@ -62,11 +62,11 @@ before(async (context) => {
     manufacturer: "Saab",
   });
 
-  leftOne.createJoin(rightOne, "bookInfo", "book");
-  leftOne.createJoin(rightTwo, "carInfo", "car");
+  leftOne.createJoin("rightOne", "bookInfo", "book");
+  leftOne.createJoin("rightTwo", "carInfo", "car");
 
-  leftTwo.createJoin(rightOne, "book", "isbn", "isbn");
-  leftTwo.createJoin(rightTwo, "car", "year", "year");
+  leftTwo.createJoin("rightOne", "book", "isbn", "isbn");
+  leftTwo.createJoin("rightTwo", "car", "year", "year");
 
   context.log(`Glitch DB setup with dummy data complete`);
   context.done();
@@ -75,12 +75,12 @@ before(async (context) => {
 sync(); // run tests one after the other
 
 test("get with related", async (c) => {
-  await c.snapshot("Mozart", await leftOne.getRelated("Mozart"));
+  await c.snapshot("Mozart", await leftOne.getWithJoins("Mozart"));
   c.done();
 });
 
 test("get with related using right key", async (c) => {
-  await c.snapshot("Bach", await leftTwo.getRelated("Bach"));
+  await c.snapshot("Bach", await leftTwo.getWithJoins("Bach"));
   c.done();
 });
 

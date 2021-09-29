@@ -4,7 +4,7 @@ import * as path from "path";
 import * as os from "os";
 import { group } from "good-vibes";
 
-import GlitchDB, { GlitchMultiDB } from ".";
+import GlitchDB, { GlitchPartition } from ".";
 import Context from "good-vibes/typings/Context";
 
 const { before, test, after, sync } = group("Cached");
@@ -16,8 +16,8 @@ interface TestData {
 
 const CACHE_SIZE = 10000;
 
-let glitchDBWithCache: GlitchDB<TestData>;
-let glitchDBNoCache: GlitchDB<TestData>;
+let glitchDBWithCache: GlitchPartition<TestData>;
+let glitchDBNoCache: GlitchPartition<TestData>;
 
 let tempDirectoryWithCache: string;
 let tempDirectoryNoCache: string;
@@ -32,15 +32,16 @@ const printMemoryStats = (c: Context): void => {
 before(async (context) => {
   tempDirectoryWithCache = path.join(os.tmpdir(), "glitch-cached");
   context.log(`Created temp directory for tests at: ${tempDirectoryWithCache}`);
-  glitchDBWithCache = new GlitchMultiDB(
+  glitchDBWithCache = new GlitchDB(
     tempDirectoryWithCache
-  ).getDatabase<TestData>("cached", null, CACHE_SIZE);
+  ).getPartition<TestData>("cached", null, CACHE_SIZE);
 
   tempDirectoryNoCache = path.join(os.tmpdir(), "glitch-no-cache");
   context.log(`Created temp directory for tests at: ${tempDirectoryNoCache}`);
-  glitchDBNoCache = new GlitchMultiDB(
-    tempDirectoryNoCache
-  ).getDatabase<TestData>("no-cache");
+  glitchDBNoCache = new GlitchDB(
+    tempDirectoryNoCache,
+    0
+  ).getPartition<TestData>("no-cache");
 
   for (let i = 0; i < CACHE_SIZE; i++) {
     await glitchDBWithCache.set(`key-${i}`, { a: `a${i}`, b: i });

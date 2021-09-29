@@ -5,46 +5,70 @@ export interface AdditionalKeyGenerator<Type> {
   (key: string, value: Type): string[];
 }
 
-export class GlitchMultiDB {
+const DEFAULT_CACHE_SIZE = 1000;
+export default class GlitchDB {
   #baseDir: string;
+  #defaultCacheSize?: number;
+  #partitions: {
+    [key: string]: {
+      name: string;
+      cache: number;
+    };
+  };
 
-  constructor(baseDir: string) {
+  constructor(baseDir: string, defaultCacheSize?: number) {
     this.#baseDir = baseDir;
+    this.#defaultCacheSize = defaultCacheSize ?? DEFAULT_CACHE_SIZE;
+    this.#partitions = {};
   }
 
-  getDatabase<Type>(
+  getPartitionByName(name: string): GlitchPartition<any> {
+    if (name in this.#partitions) {
+      const partition = this.#partitions[name];
+      return this.getPartition<any>(partition.name, null, partition.cache);
+    }
+    throw new Error(`Glitch Partition with name ${name} not found`);
+  }
+
+  getPartition<Type>(
     name: string,
     additionalKeyGenerator?: AdditionalKeyGenerator<Type>,
     cacheSize?: number
-  ): GlitchDB<Type> {
-    return new GlitchDB<Type>(
+  ): GlitchPartition<Type> {
+    const cacheSizeWithDefault = cacheSize ?? this.#defaultCacheSize;
+    this.#partitions[name] = { name, cache: cacheSizeWithDefault };
+    return new GlitchPartition<Type>(
+      this,
       `${this.#baseDir}/${name}`,
       additionalKeyGenerator,
-      cacheSize
+      cacheSizeWithDefault
     );
   }
 }
 
-interface Joiner<Type> {
-  db: GlitchDB<Type>;
+interface Joiner {
+  db: string;
   leftKey: string;
   rightKey?: string;
   joinName: string;
 }
-export default class GlitchDB<Type> {
+export class GlitchPartition<Type> {
   #localDir: string;
   #initComplete: boolean;
   #additionalKeyGenerator: AdditionalKeyGenerator<Type>;
   #joins: {
-    [joinName: string]: Joiner<any>;
+    [joinName: string]: Joiner;
   };
   #cache: LRUCache<string, Type>;
+  #master: GlitchDB;
 
   constructor(
+    master: GlitchDB,
     localDir: string,
     additionalKeyGenerator?: AdditionalKeyGenerator<Type>,
     cacheSize?: number
   ) {
+    this.#master = master;
     this.#localDir = localDir;
     this.#additionalKeyGenerator = additionalKeyGenerator;
     this.#joins = {};
@@ -75,8 +99,9 @@ export default class GlitchDB<Type> {
     }
   }
 
-  createJoin<TypeRight>( // todo make persistent
-    db: GlitchDB<TypeRight>,
+  createJoin(
+    // todo make persistent
+    db: string,
     joinName: string,
     leftKey: string,
     rightKey?: string
@@ -94,7 +119,7 @@ export default class GlitchDB<Type> {
     };
   }
 
-  async getRelated(key: string): Promise<any> {
+  async getWithJoins(key: string): Promise<any> {
     await this.#init();
     const leftData = await this.get(key);
     if (leftData === undefined) {
@@ -108,13 +133,14 @@ export default class GlitchDB<Type> {
     let joinedData = {};
     for (const rightKey of Object.keys(this.#joins)) {
       const joiner = this.#joins[rightKey];
+      const db = this.#master.getPartitionByName(joiner.db);
       let rightData;
       if (joiner.rightKey) {
-        rightData = Object.values(await joiner.db.data()).find(
+        rightData = Object.values(await db.data()).find(
           (each) => leftData[joiner.leftKey] === each[joiner.rightKey]
         );
       } else {
-        rightData = await joiner.db.get(leftData[joiner.leftKey]);
+        rightData = await db.get(leftData[joiner.leftKey]);
       }
       joinedData[joiner.joinName] = rightData;
     }

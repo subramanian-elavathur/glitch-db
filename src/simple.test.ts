@@ -3,22 +3,22 @@ import * as path from "path";
 import * as os from "os";
 import { group } from "good-vibes";
 
-import GlitchDB, { AdditionalKeyGenerator, GlitchMultiDB } from ".";
+import GlitchDB, { AdditionalKeyGenerator, GlitchPartition } from ".";
 
 let tempDirectory: string;
 const { before, test, after, sync } = group("Simple");
 
-let glitchDB: GlitchDB<string>;
+let glitchDB: GlitchPartition<string>;
 
 before(async (context) => {
   tempDirectory = path.join(os.tmpdir(), "glitch");
   context.log(`Created temp directory for tests at: ${tempDirectory}`);
-  const multiDB = new GlitchMultiDB(tempDirectory);
+  const multiDB = new GlitchDB(tempDirectory, 0);
   const additionalKeyGenerator: AdditionalKeyGenerator<string> = (
     key,
     value
   ) => [`${key}~${value}`, value];
-  glitchDB = multiDB.getDatabase<string>("master", additionalKeyGenerator);
+  glitchDB = multiDB.getPartition<string>("master", additionalKeyGenerator);
   await glitchDB.set("key-1", "value-1");
   await glitchDB.set("key-2", "value-2");
   await glitchDB.set("key-3", "value-3");
