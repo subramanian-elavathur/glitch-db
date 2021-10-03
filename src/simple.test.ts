@@ -9,11 +9,12 @@ let tempDirectory: string;
 const { before, test, after, sync } = group("Simple");
 
 let glitchDB: GlitchPartition<string>;
+let multiDB: GlitchDB;
 
 before(async (context) => {
   tempDirectory = path.join(os.tmpdir(), "glitch");
   context.log(`Created temp directory for tests at: ${tempDirectory}`);
-  const multiDB = new GlitchDB(tempDirectory, 0);
+  multiDB = new GlitchDB(tempDirectory, 0);
   const additionalKeyGenerator: AdditionalKeyGenerator<string> = (
     key,
     value
@@ -77,8 +78,12 @@ test("data api", async (c) => {
 
 after(async (c) => {
   try {
+    const backupPath = multiDB.backup("./");
+    console.log(`Backed up data to ${backupPath}`);
     await fs.rmdir(tempDirectory, { recursive: true });
     c.log("Deleted temp directory after tests");
+    await fs.rm(backupPath);
+    c.log("Deleted backup");
     c.done();
   } catch (e) {
     c.log(`Could not delete temp directory at: ${tempDirectory}`);

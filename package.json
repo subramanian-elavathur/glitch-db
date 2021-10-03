@@ -1,6 +1,6 @@
 {
   "name": "glitch-db",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "A simple, file based key-value database",
   "main": "lib/index.js",
   "types": "./typings/index.d.ts",
@@ -40,10 +40,12 @@
   "devDependencies": {
     "@types/lru-cache": "^5.1.1",
     "@types/node": "^16.7.3",
+    "@types/tar": "^4.0.5",
     "good-vibes": "^0.13.2",
     "typescript": "^4.3.5"
   },
   "dependencies": {
-    "lru-cache": "^6.0.0"
+    "lru-cache": "^6.0.0",
+    "tar": "^6.1.11"
   }
 }

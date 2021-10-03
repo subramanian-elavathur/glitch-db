@@ -1,4 +1,5 @@
 import LRUCache = require("lru-cache");
+import tar = require("tar");
 const fs = require("fs/promises");
 
 export interface AdditionalKeyGenerator<Type> {
@@ -28,6 +29,20 @@ export default class GlitchDB {
       return this.getPartition<any>(partition.name, null, partition.cache);
     }
     throw new Error(`Glitch Partition with name ${name} not found`);
+  }
+
+  backup(outputDirectory: string): string {
+    const fileLocation = `${outputDirectory}/backup-${new Date().getTime()}.tgz`;
+    tar.create(
+      {
+        gzip: true,
+        sync: true,
+        cwd: this.#baseDir,
+        file: fileLocation,
+      },
+      ["."]
+    );
+    return fileLocation;
   }
 
   getPartition<Type>(
