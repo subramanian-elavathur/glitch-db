@@ -37,7 +37,7 @@ export default class GlitchDB {
   ): GlitchPartition<Type> {
     const cacheSizeWithDefault = cacheSize ?? this.#defaultCacheSize;
     this.#partitions[name] = { name, cache: cacheSizeWithDefault };
-    return new GlitchPartition<Type>(
+    return new GlitchPartitionImpl<Type>(
       this,
       `${this.#baseDir}/${name}`,
       additionalKeyGenerator,
@@ -52,7 +52,24 @@ interface Joiner {
   rightKey?: string;
   joinName: string;
 }
-export class GlitchPartition<Type> {
+
+export interface GlitchPartition<Type> {
+  createJoin: (
+    db: string,
+    joinName: string,
+    leftKey: string,
+    rightKey?: string
+  ) => void;
+  getWithJoins: (key: string) => Promise<any>;
+  exists: (key: string) => Promise<boolean>;
+  get: (key: string) => Promise<Type>;
+  keys: (includeAdditionalKeys?: boolean) => Promise<string[]>;
+  data: () => Promise<{ [key: string]: Type }>;
+  set: (key: string, value: Type) => Promise<boolean>;
+  unset: (key: string, symlinksOnly?: boolean) => Promise<boolean>;
+}
+
+class GlitchPartitionImpl<Type> implements GlitchPartition<Type> {
   #localDir: string;
   #initComplete: boolean;
   #additionalKeyGenerator: AdditionalKeyGenerator<Type>;
