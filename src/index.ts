@@ -14,6 +14,7 @@ export default class GlitchDB {
     [key: string]: {
       name: string;
       cache: number;
+      versioned: boolean;
     };
   };
 
@@ -51,12 +52,36 @@ export default class GlitchDB {
     cacheSize?: number
   ): GlitchPartition<Type> {
     const cacheSizeWithDefault = cacheSize ?? this.#defaultCacheSize;
-    this.#partitions[name] = { name, cache: cacheSizeWithDefault };
+    this.#partitions[name] = {
+      name,
+      cache: cacheSizeWithDefault,
+      versioned: false,
+    };
     return new GlitchPartitionImpl<Type>(
       this,
       `${this.#baseDir}/${name}`,
       additionalKeyGenerator,
       cacheSizeWithDefault
+    );
+  }
+
+  getVersionedPartition<Type>(
+    name: string,
+    additionalKeyGenerator?: AdditionalKeyGenerator<Type>,
+    cacheSize?: number
+  ): GlitchVersionedPartition<Type> {
+    const cacheSizeWithDefault = cacheSize ?? this.#defaultCacheSize;
+    this.#partitions[name] = {
+      name,
+      cache: cacheSizeWithDefault,
+      versioned: true,
+    };
+    return new GlitchPartitionImpl<Type>(
+      this,
+      `${this.#baseDir}/${name}`,
+      additionalKeyGenerator,
+      cacheSizeWithDefault,
+      true
     );
   }
 }
@@ -68,7 +93,26 @@ interface Joiner {
   joinName: string;
 }
 
+interface Version {
+  metadata?: {
+    [key: string]: string;
+  };
+  version: number;
+  updatedAt: number;
+}
+
+interface VersionedData<Type> extends Version {
+  data: Type;
+  additionalKeys?: string[];
+}
+
 export interface GlitchPartition<Type> {
+  exists: (key: string) => Promise<boolean>;
+  get: (key: string) => Promise<Type>;
+  keys: (includeAdditionalKeys?: boolean) => Promise<string[]>;
+  data: () => Promise<{ [key: string]: Type }>;
+  set: (key: string, value: Type) => Promise<boolean>;
+  unset: (key: string, symlinksOnly?: boolean) => Promise<boolean>;
   createJoin: (
     db: string,
     joinName: string,
@@ -76,29 +120,53 @@ export interface GlitchPartition<Type> {
     rightKey?: string
   ) => void;
   getWithJoins: (key: string) => Promise<any>;
-  exists: (key: string) => Promise<boolean>;
-  get: (key: string) => Promise<Type>;
-  keys: (includeAdditionalKeys?: boolean) => Promise<string[]>;
-  data: () => Promise<{ [key: string]: Type }>;
-  set: (key: string, value: Type) => Promise<boolean>;
-  unset: (key: string, symlinksOnly?: boolean) => Promise<boolean>;
 }
 
-class GlitchPartitionImpl<Type> implements GlitchPartition<Type> {
+export interface GlitchVersionedPartition<Type> extends GlitchPartition<Type> {
+  getVersion: (key: string, version: number) => Promise<Type>;
+  getVersionWithAudit: (
+    key: string,
+    version?: number
+  ) => Promise<VersionedData<Type>>;
+  getAllVersions: (key: string) => Promise<Version[]>;
+}
+
+// Versioning
+// Fully backwards compatible when versioning is not used
+// When versioning is used, the version is auto incremented and updatedAt set to current epoch
+// metadata can be provided by the users
+// File structuring algorithm
+// File naming - key.version.json | version is an auto incrementing number
+// symlink of format key.json always points to the latest version id - thats how glitch-db knows which is latest
+//   this will impact additionalKeyGenerator keys
+// api updates
+// [DONE] set
+//   [DONE] to handle versioning
+//   [DONE] set starts with call to unset
+//   [DONE] we should just unset symlinks, we should nto remove all versions as part of this
+// [DONE] get - should get by key by default and return the .data property of versioned object
+// [DONE] keys - should only return non versioned key - and filter out additionalKeys
+// [DONE] exists - to return true is key resolves to file or symlink
+// [DONE] data - should work as expected once keys is fixed
+// unset - remove all versions of data and properly handle symlinks too
+
+class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
   #localDir: string;
   #initComplete: boolean;
   #additionalKeyGenerator: AdditionalKeyGenerator<Type>;
   #joins: {
     [joinName: string]: Joiner;
   };
-  #cache: LRUCache<string, Type>;
+  #cache: LRUCache<string, Type>; // cache always maintains the latest data
   #master: GlitchDB;
+  #versioned: boolean;
 
   constructor(
     master: GlitchDB,
     localDir: string,
     additionalKeyGenerator?: AdditionalKeyGenerator<Type>,
-    cacheSize?: number
+    cacheSize?: number,
+    versioned?: boolean
   ) {
     this.#master = master;
     this.#localDir = localDir;
@@ -107,6 +175,22 @@ class GlitchPartitionImpl<Type> implements GlitchPartition<Type> {
     if (cacheSize > 0) {
       this.#cache = new LRUCache(cacheSize);
     }
+    this.#versioned = versioned;
+  }
+
+  async getVersion(key: string, version: number): Promise<Type> {
+    return null;
+  }
+
+  async getVersionWithAudit(
+    key: string,
+    version?: number
+  ): Promise<VersionedData<Type>> {
+    return null;
+  }
+
+  async getAllVersions(key: string): Promise<Version[]> {
+    return null;
   }
 
   async #init() {
@@ -191,7 +275,7 @@ class GlitchPartitionImpl<Type> implements GlitchPartition<Type> {
     } catch (e) {
       return Promise.resolve(false);
     }
-    if (stat && stat.isFile()) {
+    if (stat && (stat.isFile() || stat.isSymbolicLink())) {
       return Promise.resolve(true);
     } else {
       return Promise.resolve(false);
@@ -209,9 +293,15 @@ class GlitchPartitionImpl<Type> implements GlitchPartition<Type> {
       const data = await fs.readFile(this.#getKeyPath(key), {
         encoding: "utf8",
       });
-      const parsed = JSON.parse(data);
-      this.#cache?.set(key, parsed);
-      return Promise.resolve(parsed);
+      if (this.#versioned) {
+        const parsed = JSON.parse(data) as VersionedData<Type>;
+        this.#cache?.set(key, parsed.data);
+        return Promise.resolve(parsed.data);
+      } else {
+        const parsed = JSON.parse(data);
+        this.#cache?.set(key, parsed);
+        return Promise.resolve(parsed);
+      }
     }
     return Promise.resolve(undefined);
   }
@@ -221,16 +311,38 @@ class GlitchPartitionImpl<Type> implements GlitchPartition<Type> {
     const files = await fs.readdir(this.#localDir);
     const keys = [];
     for (const file of files) {
-      if (includeAdditionalKeys) {
-        keys.push(this.#getKeyFromFile(file));
-      } else {
+      if (this.#versioned) {
         const stat = await fs.lstat(`${this.#localDir}/${file}`);
-        if (!stat.isSymbolicLink()) {
+        // only symbolic link contains latest data for version
+        if (stat.isSymbolicLink()) {
           keys.push(this.#getKeyFromFile(file));
+        }
+      } else {
+        if (includeAdditionalKeys) {
+          keys.push(this.#getKeyFromFile(file));
+        } else {
+          const stat = await fs.lstat(`${this.#localDir}/${file}`);
+          if (!stat.isSymbolicLink()) {
+            keys.push(this.#getKeyFromFile(file));
+          }
         }
       }
     }
-    return keys;
+    // filter out additionalKeys from keys array for versioned dataset
+    if (this.#versioned) {
+      const additionalKeys = new Set();
+      for (const key of keys) {
+        const data: VersionedData<Type> = await this.getVersionWithAudit(key);
+        if (data?.additionalKeys?.length) {
+          for (const additionalKey of data.additionalKeys) {
+            additionalKeys.add(additionalKey);
+          }
+        }
+      }
+      return keys.filter((each) => !additionalKeys.has(each));
+    } else {
+      return keys;
+    }
   }
 
   async data(): Promise<{ [key: string]: Type }> {
@@ -243,35 +355,72 @@ class GlitchPartitionImpl<Type> implements GlitchPartition<Type> {
     return data;
   }
 
-  #getKeyPath(key: string): string {
-    return `${this.#localDir}/${key}.json`;
+  #getKeyPath(key: string, version?: number): string {
+    return version
+      ? `${this.#localDir}/${key}.${version}.json`
+      : `${this.#localDir}/${key}.json`;
   }
 
   #getKeyFromFile(fileName: string) {
     return fileName.replace(".json", "");
   }
 
-  async set(key: string, value: Type): Promise<boolean> {
+  async #getNextVersion(key: string): Promise<number> {
+    if (this.#versioned) {
+      if (this.exists(key)) {
+        const data: VersionedData<Type> = await this.getVersionWithAudit(key);
+        return Promise.resolve(data.version + 1);
+      } else {
+        return Promise.resolve(1); // initial version
+      }
+    } else {
+      return Promise.resolve(undefined);
+    }
+  }
+
+  async set(
+    key: string,
+    value: Type,
+    metadata?: { [key: string]: string }
+  ): Promise<boolean> {
     await this.#init();
+    const nextVersion = await this.#getNextVersion(key);
+    const filePath = this.#getKeyPath(key, nextVersion);
+    // get additional keys
+    const keys = this.#additionalKeyGenerator
+      ? this.#additionalKeyGenerator(key, value)
+      : undefined;
     // Removing symlinks before setting them again is important
     // because they may be generated using the value object
     // which may have changed later as part of this update instruction
     await this.unset(key, true);
-    const filePath = this.#getKeyPath(key);
+
     try {
-      await fs.writeFile(filePath, JSON.stringify(value));
+      if (this.#versioned) {
+        const versionedData: VersionedData<Type> = {
+          data: value,
+          updatedAt: new Date().valueOf(),
+          version: nextVersion,
+          additionalKeys: keys,
+          metadata,
+        };
+        await fs.writeFile(filePath, JSON.stringify(versionedData));
+      } else {
+        await fs.writeFile(filePath, JSON.stringify(value));
+      }
+
       if (this.#cache) {
         this.#cache?.set(key, value);
       }
       // add symlinks
       try {
-        if (this.#additionalKeyGenerator) {
-          const keys = this.#additionalKeyGenerator(key, value);
-          if (keys?.length) {
-            await Promise.all(
-              keys.map((each) => fs.symlink(filePath, this.#getKeyPath(each))) // in windows requires admin rights
-            );
+        if (keys?.length) {
+          if (this.#versioned) {
+            keys.push(key);
           }
+          await Promise.all(
+            keys.map((each) => fs.symlink(filePath, this.#getKeyPath(each))) // in windows requires admin rights
+          );
         }
       } catch (e) {
         console.log(`Error setting additional keys, received exception ${e}`);
@@ -292,23 +441,37 @@ class GlitchPartitionImpl<Type> implements GlitchPartition<Type> {
     const value = await this.get(key);
     if (value) {
       try {
-        if (!symlinksOnly) {
-          await fs.rm(this.#getKeyPath(key));
-        }
+        // clear out symlinks first
         try {
-          if (this.#additionalKeyGenerator) {
-            const keys = this.#additionalKeyGenerator(key, value);
-            if (keys?.length) {
-              await Promise.all(
-                keys.map((each) => fs.unlink(this.#getKeyPath(each)))
-              );
-            }
+          let keys: string[] = this.#additionalKeyGenerator
+            ? this.#additionalKeyGenerator(key, value)
+            : [];
+          if (this.#versioned) {
+            keys.push(key); // keys for versioned datasets are symlinks
+          }
+          if (keys?.length) {
+            await Promise.all(
+              keys.map((each) => fs.unlink(this.#getKeyPath(each)))
+            );
           }
         } catch (e) {
           console.log(
             `Error removing additional keys, received exception ${e}`
           );
           return Promise.resolve(false);
+        }
+
+        // remove actual files next
+        if (!symlinksOnly) {
+          // remove all versions for versioned datasets
+          if (this.#versioned) {
+            const versions = await this.getAllVersions(key);
+            for (const version of versions) {
+              await fs.rm(this.#getKeyPath(key, version.version));
+            }
+          } else {
+            await fs.rm(this.#getKeyPath(key));
+          }
         }
         return Promise.resolve(true);
       } catch (e) {
