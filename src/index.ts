@@ -152,6 +152,7 @@ export interface GlitchVersionedPartition<Type> extends GlitchPartition<Type> {
 // [DONE] exists - to return true is key resolves to file or symlink
 // [DONE] data - should work as expected once keys is fixed
 // [DONE] unset - remove all versions of data and properly handle symlinks too
+// [TODO] all 3 new api's should support query by additional keys also
 
 class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
   #localDir: string;
