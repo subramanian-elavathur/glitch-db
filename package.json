@@ -17,7 +17,7 @@
   },
   "scripts": {
     "build": "npx tsc",
-    "test": "npm run build && node lib/test.js",
+    "test": "npm run build && node lib/all.test.js",
     "coverage": "nyc --reporter=lcov --reporter=text-summary npm run test",
     "coverage-codecov": "npm run coverage && codecov"
   },

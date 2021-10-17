@@ -107,11 +107,15 @@ interface VersionedData<Type> extends Version {
 }
 
 export interface GlitchPartition<Type> {
-  exists: (key: string) => Promise<boolean>;
-  get: (key: string) => Promise<Type>;
+  exists: (key: string, version?: number) => Promise<boolean>;
+  get: (key: string, version?: number) => Promise<Type>;
   keys: (includeAdditionalKeys?: boolean) => Promise<string[]>;
   data: () => Promise<{ [key: string]: Type }>;
-  set: (key: string, value: Type) => Promise<boolean>;
+  set: (
+    key: string,
+    value: Type,
+    metadata?: { [key: string]: string }
+  ) => Promise<boolean>;
   unset: (key: string, symlinksOnly?: boolean) => Promise<boolean>;
   createJoin: (
     db: string,
@@ -123,7 +127,6 @@ export interface GlitchPartition<Type> {
 }
 
 export interface GlitchVersionedPartition<Type> extends GlitchPartition<Type> {
-  getVersion: (key: string, version: number) => Promise<Type>;
   getVersionWithAudit: (
     key: string,
     version?: number
@@ -144,11 +147,11 @@ export interface GlitchVersionedPartition<Type> extends GlitchPartition<Type> {
 //   [DONE] to handle versioning
 //   [DONE] set starts with call to unset
 //   [DONE] we should just unset symlinks, we should nto remove all versions as part of this
-// [DONE] get - should get by key by default and return the .data property of versioned object
+// [DONE] get - should get by key by default and return the .data property of versioned object | cache should not have old versions
 // [DONE] keys - should only return non versioned key - and filter out additionalKeys
 // [DONE] exists - to return true is key resolves to file or symlink
 // [DONE] data - should work as expected once keys is fixed
-// unset - remove all versions of data and properly handle symlinks too
+// [DONE] unset - remove all versions of data and properly handle symlinks too
 
 class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
   #localDir: string;
@@ -176,21 +179,6 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
       this.#cache = new LRUCache(cacheSize);
     }
     this.#versioned = versioned;
-  }
-
-  async getVersion(key: string, version: number): Promise<Type> {
-    return null;
-  }
-
-  async getVersionWithAudit(
-    key: string,
-    version?: number
-  ): Promise<VersionedData<Type>> {
-    return null;
-  }
-
-  async getAllVersions(key: string): Promise<Version[]> {
-    return null;
   }
 
   async #init() {
@@ -263,12 +251,12 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
     return Promise.resolve({ ...joinedData, ...leftData });
   }
 
-  async exists(key: string): Promise<boolean> {
+  async exists(key: string, version?: number): Promise<boolean> {
     await this.#init();
     if (this.#cache?.has(key)) {
       return Promise.resolve(true);
     }
-    const keyPath = this.#getKeyPath(key);
+    const keyPath = this.#getKeyPath(key, version);
     let stat;
     try {
       stat = await fs.stat(keyPath);
@@ -282,20 +270,22 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
     }
   }
 
-  async get(key: string): Promise<Type> {
+  async get(key: string, version?: number): Promise<Type> {
     await this.#init();
     const cachedData = this.#cache?.get(key);
     if (cachedData) {
       return Promise.resolve(cachedData);
     }
-    const exists = await this.exists(key);
+    const exists = await this.exists(key, version);
     if (exists) {
-      const data = await fs.readFile(this.#getKeyPath(key), {
+      const data = await fs.readFile(this.#getKeyPath(key, version), {
         encoding: "utf8",
       });
       if (this.#versioned) {
         const parsed = JSON.parse(data) as VersionedData<Type>;
-        this.#cache?.set(key, parsed.data);
+        if (!version) {
+          this.#cache?.set(key, parsed.data); // do not set previous version data into cache
+        }
         return Promise.resolve(parsed.data);
       } else {
         const parsed = JSON.parse(data);
@@ -304,6 +294,47 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
       }
     }
     return Promise.resolve(undefined);
+  }
+
+  async getVersionWithAudit(
+    key: string,
+    version?: number
+  ): Promise<VersionedData<Type>> {
+    await this.#init();
+    const exists = await this.exists(key, version);
+    if (exists) {
+      const data = await fs.readFile(this.#getKeyPath(key, version), {
+        encoding: "utf8",
+      });
+      const parsed = JSON.parse(data) as VersionedData<Type>;
+      return Promise.resolve(parsed);
+    }
+    return Promise.resolve(undefined);
+  }
+
+  async getAllVersions(key: string): Promise<Version[]> {
+    await this.#init();
+    const files = await fs.readdir(this.#localDir);
+    const versionedFilesForKey: string[] = [];
+    for (const file of files) {
+      const stat = await fs.lstat(`${this.#localDir}/${file}`);
+      if (!stat.isSymbolicLink() && file.includes(key)) {
+        versionedFilesForKey.push(file);
+      }
+    }
+    const data: Version[] = [];
+    for (const version of versionedFilesForKey) {
+      const rawData = await fs.readFile(this.#getFilePath(version), {
+        encoding: "utf8",
+      });
+      const parsed = JSON.parse(rawData) as VersionedData<Type>;
+      data.push({
+        version: parsed.version,
+        updatedAt: parsed.updatedAt,
+        metadata: parsed.metadata,
+      });
+    }
+    return Promise.resolve(data);
   }
 
   async keys(includeAdditionalKeys?: boolean): Promise<string[]> {
@@ -361,13 +392,17 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
       : `${this.#localDir}/${key}.json`;
   }
 
+  #getFilePath(file: string): string {
+    return `${this.#localDir}/${file}`;
+  }
+
   #getKeyFromFile(fileName: string) {
     return fileName.replace(".json", "");
   }
 
   async #getNextVersion(key: string): Promise<number> {
     if (this.#versioned) {
-      if (this.exists(key)) {
+      if (await this.exists(key)) {
         const data: VersionedData<Type> = await this.getVersionWithAudit(key);
         return Promise.resolve(data.version + 1);
       } else {
