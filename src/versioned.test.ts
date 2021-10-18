@@ -97,6 +97,7 @@ test("get all versions", async (c) => {
 test("get specific version", async (c) => {
   await c.snapshot("get gravity version 2", await glitchDB.get("gravity", 2));
   await c.snapshot("get delicate version 1", await glitchDB.get("delicate", 1));
+  await c.check(undefined, await glitchDB.get("delicate", 46));
   c.done();
 });
 

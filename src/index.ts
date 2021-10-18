@@ -254,8 +254,10 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
 
   async exists(key: string, version?: number): Promise<boolean> {
     await this.#init();
-    if (this.#cache?.has(key)) {
-      return Promise.resolve(true);
+    if (!version) {
+      if (this.#cache?.has(key)) {
+        return Promise.resolve(true);
+      }
     }
     const keyPath = this.#getKeyPath(key, version);
     let stat;
@@ -273,8 +275,8 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
 
   async get(key: string, version?: number): Promise<Type> {
     await this.#init();
+    // do not check cache for specific versions
     if (!version) {
-      // do not check cache for specific versions
       const cachedData = this.#cache?.get(key);
       if (cachedData) {
         return Promise.resolve(cachedData);
