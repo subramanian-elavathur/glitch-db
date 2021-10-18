@@ -122,6 +122,16 @@ test("data", async (c) => {
   c.done();
 });
 
+test("unset", async (c) => {
+  await glitchDB.unset("gravity");
+  c.check([], await glitchDB.getAllVersions("gravity"));
+  c.check(undefined, await glitchDB.get("gravity"));
+  c.check(undefined, await glitchDB.get("John Mayerz"));
+  c.check(undefined, await glitchDB.get("gravity", 1));
+  c.check(undefined, await glitchDB.get("gravity", 2));
+  c.done();
+});
+
 after(async (c) => {
   try {
     await fs.rmdir(tempDirectory, { recursive: true });

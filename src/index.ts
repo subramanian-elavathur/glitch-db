@@ -273,9 +273,12 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
 
   async get(key: string, version?: number): Promise<Type> {
     await this.#init();
-    const cachedData = this.#cache?.get(key);
-    if (cachedData) {
-      return Promise.resolve(cachedData);
+    if (!version) {
+      // do not check cache for specific versions
+      const cachedData = this.#cache?.get(key);
+      if (cachedData) {
+        return Promise.resolve(cachedData);
+      }
     }
     const exists = await this.exists(key, version);
     if (exists) {
@@ -482,10 +485,17 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
           let keys: string[] = this.#additionalKeyGenerator
             ? this.#additionalKeyGenerator(key, value)
             : [];
-          if (this.#versioned) {
+          if (this.#versioned && !keys.includes(key)) {
             keys.push(key); // keys for versioned datasets are symlinks
           }
+          // during the get api call we add information to the cache using the
+          // additional keys as well so its important to clear out the cache too
           if (keys?.length) {
+            for (const cachedKey of keys) {
+              if (this.#cache?.has(cachedKey)) {
+                this.#cache?.del(cachedKey);
+              }
+            }
             await Promise.all(
               keys.map((each) => fs.unlink(this.#getKeyPath(each)))
             );
