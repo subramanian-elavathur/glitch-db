@@ -110,7 +110,7 @@ test("get version with audit", async (c) => {
     ...(await glitchDB.getVersionWithAudit("delicate")),
     updatedAt: undefined,
   });
-  await c.check(undefined, await glitchDB.get("gravity", 37));
+  await c.check(undefined, await glitchDB.getVersionWithAudit("gravity", 37));
   c.done();
 });
 
