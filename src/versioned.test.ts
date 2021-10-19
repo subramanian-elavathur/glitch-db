@@ -21,9 +21,9 @@ let tempDirectory: string;
 before(async (context) => {
   tempDirectory = path.join(os.tmpdir(), "glitch-versioned");
   context.log(`Created temp directory for tests at: ${tempDirectory}`);
+  // indices [value.artist]
   glitchDB = new GlitchDB(tempDirectory).getVersionedPartition<TestData>(
-    "versioned",
-    (_, value) => [value.artist]
+    "versioned"
   );
   await glitchDB.set("gravity", {
     song: "Gravity",
@@ -39,10 +39,10 @@ sync(); // run tests one after the other
 
 test("get", async (c) => {
   await c.snapshot("get latest version", await glitchDB.get("gravity"));
-  await c.snapshot(
-    "get latest version by key",
-    await glitchDB.get("John Mayer")
-  );
+  // await c.snapshot(
+  //   "get latest version by key",
+  //   await glitchDB.get("John Mayer")
+  // );
   c.done();
 });
 
@@ -79,12 +79,12 @@ test("get all versions", async (c) => {
       await glitchDB.getAllVersions("gravity")
     ).map((each) => ({ ...each, updatedAt: undefined }))
   );
-  await c.snapshot(
-    "all delicate versions by key",
-    (
-      await glitchDB.getAllVersions("Damien Rice")
-    ).map((each) => ({ ...each, updatedAt: undefined }))
-  );
+  // await c.snapshot(
+  //   "all delicate versions by key",
+  //   (
+  //     await glitchDB.getAllVersions("Damien Rice")
+  //   ).map((each) => ({ ...each, updatedAt: undefined }))
+  // );
   await c.snapshot(
     "all delicate versions",
     (
@@ -124,13 +124,14 @@ test("data", async (c) => {
   c.done();
 });
 
-test("unset", async (c) => {
-  await glitchDB.unset("gravity");
+test("del", async (c) => {
+  await glitchDB.del("gravity");
   c.check([], await glitchDB.getAllVersions("gravity"));
   c.check(undefined, await glitchDB.get("gravity"));
   c.check(undefined, await glitchDB.get("John Mayerz"));
   c.check(undefined, await glitchDB.get("gravity", 1));
   c.check(undefined, await glitchDB.get("gravity", 2));
+  await glitchDB.del("gravity"); // test deleting key that does not exist
   c.done();
 });
 

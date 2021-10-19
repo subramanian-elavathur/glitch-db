@@ -3,7 +3,7 @@ import * as path from "path";
 import * as os from "os";
 import { group } from "good-vibes";
 
-import GlitchDB, { AdditionalKeyGenerator, GlitchPartition } from ".";
+import GlitchDB, { GlitchPartition } from ".";
 
 let tempDirectory: string;
 const { before, test, after, sync } = group("Simple");
@@ -15,11 +15,8 @@ before(async (context) => {
   tempDirectory = path.join(os.tmpdir(), "glitch");
   context.log(`Created temp directory for tests at: ${tempDirectory}`);
   multiDB = new GlitchDB(tempDirectory, 0);
-  const additionalKeyGenerator: AdditionalKeyGenerator<string> = (
-    key,
-    value
-  ) => [`${key}~${value}`, value];
-  glitchDB = multiDB.getPartition<string>("master", additionalKeyGenerator);
+  // indices [`${key}~${value}`, value]
+  glitchDB = multiDB.getPartition<string>("master");
   await glitchDB.set("key-1", "value-1");
   await glitchDB.set("key-2", "value-2");
   await glitchDB.set("key-3", "value-3");
@@ -54,7 +51,7 @@ test("reset api", async (c) => {
 });
 
 test("unset api", async (c) => {
-  await glitchDB.unset("key-3");
+  await glitchDB.del("key-3");
   c.check(undefined, await glitchDB.get("key-3")).done();
 });
 
@@ -65,7 +62,7 @@ test("keys api", async (c) => {
 test("keys api with additional keys", async (c) => {
   c.check(
     ["key-1", "key-1~value-4", "key-2", "key-2~value-2", "value-2", "value-4"],
-    await glitchDB.keys(true)
+    await glitchDB.keys()
   ).done();
 });
 
