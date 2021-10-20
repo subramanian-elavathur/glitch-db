@@ -30,22 +30,13 @@ test("get api", async (c) => {
   c.check("value-1", await glitchDB.get("key-1")).done();
 });
 
-test("get api with additional keys", async (c) => {
-  c.check("value-2", await glitchDB.get("value-2"))
-    .check("value-2", await glitchDB.get("key-2~value-2"))
-    .done();
-});
-
 test("exists api", async (c) => {
   c.check(true, await glitchDB.exists("key-1")).done();
 });
 
 test("reset api", async (c) => {
   await glitchDB.set("key-1", "value-4");
-  c.check("value-4", await glitchDB.get("value-4"))
-    .check("value-4", await glitchDB.get("key-1~value-4"))
-    .check("value-4", await glitchDB.get("key-1"))
-    .check(undefined, await glitchDB.get("value-1"))
+  c.check(undefined, await glitchDB.get("value-1"))
     .check(undefined, await glitchDB.get("key-1~value-1"))
     .done();
 });
@@ -60,10 +51,7 @@ test("keys api", async (c) => {
 });
 
 test("keys api with additional keys", async (c) => {
-  c.check(
-    ["key-1", "key-1~value-4", "key-2", "key-2~value-2", "value-2", "value-4"],
-    await glitchDB.keys()
-  ).done();
+  c.check(["key-1", "key-2"], await glitchDB.keys()).done();
 });
 
 test("data api", async (c) => {

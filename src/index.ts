@@ -1,7 +1,6 @@
 import LRUCache = require("lru-cache");
 import tar = require("tar");
-import get = require("lodash.get");
-import BiMap from "./BiMap";
+import lget = require("lodash.get");
 const fs = require("fs/promises");
 
 const DEFAULT_CACHE_SIZE = 1000;
@@ -155,7 +154,9 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
   #localDir: string;
   #initComplete: boolean;
   #indices: string[];
-  #indexBiMap: BiMap;
+  #indexMap: {
+    [key: string]: string;
+  };
   #joins: {
     [joinName: string]: Joiner;
   };
@@ -177,9 +178,7 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
       this.#cache = new LRUCache(cacheSize);
     }
     this.#indices = indices;
-    if (this.#indices) {
-      this.#indexBiMap = new BiMap();
-    }
+    this.#indexMap = {};
     this.#versioned = versioned;
   }
 
@@ -237,21 +236,25 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
       : `${this.#localDir}/${key}.json`;
   }
 
+  #resolveKey(key: string) {
+    return this.#indexMap[key] ?? key;
+  }
+
   async exists(key: string, version?: number): Promise<boolean> {
     await this.#init();
-    if (this.#cache?.has(this.#getCacheKey(key, version))) {
+    const resolvedKey = this.#resolveKey(key);
+    if (this.#cache?.has(this.#getCacheKey(resolvedKey, version))) {
       return Promise.resolve(true);
     }
-    const keyPath = this.#getKeyPath(key, version);
-    let stat;
+    const keyPath = this.#getKeyPath(resolvedKey, version);
     try {
-      stat = await fs.stat(keyPath);
+      const stat = await fs.stat(keyPath);
+      if (stat && (stat.isFile() || stat.isSymbolicLink())) {
+        return Promise.resolve(true);
+      } else {
+        return Promise.resolve(false);
+      }
     } catch (e) {
-      return Promise.resolve(false);
-    }
-    if (stat && (stat.isFile() || stat.isSymbolicLink())) {
-      return Promise.resolve(true);
-    } else {
       return Promise.resolve(false);
     }
   }
@@ -259,20 +262,26 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
   // todo find key from index
   async get(key: string, version?: number): Promise<Type> {
     await this.#init();
-    const cachedData = this.#cache?.get(this.#getCacheKey(key, version));
+    const resolvedKey = this.#resolveKey(key);
+    const cachedData = this.#cache?.get(
+      this.#getCacheKey(resolvedKey, version)
+    );
     if (cachedData) {
       return Promise.resolve(cachedData);
     }
-    const exists = await this.exists(key, version);
+    const exists = await this.exists(resolvedKey, version);
     if (exists) {
-      const fileData = await fs.readFile(this.#getKeyPath(key, version), {
-        encoding: "utf8",
-      });
+      const fileData = await fs.readFile(
+        this.#getKeyPath(resolvedKey, version),
+        {
+          encoding: "utf8",
+        }
+      );
       const parsed = JSON.parse(fileData);
       const data = this.#versioned
         ? (parsed as VersionedData<Type>).data
         : parsed;
-      this.#cache?.set(this.#getCacheKey(key, version), data);
+      this.#cache?.set(this.#getCacheKey(resolvedKey, version), data);
       return Promise.resolve(data);
     }
     return Promise.resolve(undefined);
@@ -391,6 +400,13 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
         console.log(`Error setting additional keys, received exception ${e}`);
         return Promise.resolve(false);
       }
+      // generate indices and set into indexBiMap
+      if (this.#indices?.length) {
+        for (const indexPattern of this.#indices) {
+          const index = lget(value, indexPattern);
+          this.#indexMap[index] = key;
+        }
+      }
       return Promise.resolve(true);
     } catch (e) {
       console.log(`Error setting value, received exception ${e}`);
@@ -420,6 +436,13 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
           }
         } else {
           await fs.rm(this.#getKeyPath(key));
+        }
+        // remove indices
+        if (this.#indices?.length) {
+          for (const indexPattern of this.#indices) {
+            const index = lget(value, indexPattern);
+            delete this.#indexMap[index];
+          }
         }
         return Promise.resolve(true);
       } catch (e) {
