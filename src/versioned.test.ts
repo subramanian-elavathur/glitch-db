@@ -124,14 +124,14 @@ test("data", async (c) => {
   c.done();
 });
 
-test("del", async (c) => {
-  await glitchDB.del("gravity");
+test("delete", async (c) => {
+  await glitchDB.delete("gravity");
   c.check([], await glitchDB.getAllVersions("gravity"));
   c.check(undefined, await glitchDB.get("gravity"));
   c.check(undefined, await glitchDB.get("John Mayerz"));
   c.check(undefined, await glitchDB.get("gravity", 1));
   c.check(undefined, await glitchDB.get("gravity", 2));
-  await glitchDB.del("gravity"); // test deleting key that does not exist
+  await glitchDB.delete("gravity"); // test deleting key that does not exist
   c.done();
 });
 

@@ -14,7 +14,7 @@ interface TestData {
   b: number;
 }
 
-const CACHE_SIZE = 10;
+const CACHE_SIZE = 10000;
 
 let glitchDBWithCache: GlitchPartition<TestData>;
 let glitchDBNoCache: GlitchPartition<TestData>;

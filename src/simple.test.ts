@@ -15,7 +15,6 @@ before(async (context) => {
   tempDirectory = path.join(os.tmpdir(), "glitch");
   context.log(`Created temp directory for tests at: ${tempDirectory}`);
   multiDB = new GlitchDB(tempDirectory, 0);
-  // indices [`${key}~${value}`, value]
   glitchDB = multiDB.getPartition<string>("master");
   await glitchDB.set("key-1", "value-1");
   await glitchDB.set("key-2", "value-2");
@@ -41,8 +40,8 @@ test("reset api", async (c) => {
     .done();
 });
 
-test("unset api", async (c) => {
-  await glitchDB.del("key-3");
+test("delete api", async (c) => {
+  await glitchDB.delete("key-3");
   c.check(undefined, await glitchDB.get("key-3")).done();
 });
 

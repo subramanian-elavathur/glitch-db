@@ -4,6 +4,9 @@ import lget = require("lodash.get");
 const fs = require("fs/promises");
 
 const DEFAULT_CACHE_SIZE = 1000;
+const INDEX_FILE = "__index__.json";
+const getIndexFilePath = (dir: string) => `${dir}/${INDEX_FILE}`;
+
 export default class GlitchDB {
   #baseDir: string;
   #defaultCacheSize?: number;
@@ -112,7 +115,7 @@ export interface GlitchPartition<Type> {
     value: Type,
     metadata?: { [key: string]: string }
   ) => Promise<boolean>;
-  del: (key: string) => Promise<boolean>;
+  delete: (key: string) => Promise<boolean>;
   createJoin: (
     db: string,
     joinName: string,
@@ -129,26 +132,6 @@ export interface GlitchVersionedPartition<Type> extends GlitchPartition<Type> {
   ) => Promise<VersionedData<Type>>;
   getAllVersions: (key: string) => Promise<Version[]>;
 }
-
-// Versioning
-// Fully backwards compatible when versioning is not used
-// When versioning is used, the version is auto incremented and updatedAt set to current epoch
-// metadata can be provided by the users
-// File structuring algorithm
-// File naming - key.version.json | version is an auto incrementing number
-// symlink of format key.json always points to the latest version id - thats how glitch-db knows which is latest
-//   this will impact additionalKeyGenerator keys
-// api updates
-// [DONE] set
-//   [DONE] to handle versioning
-//   [DONE] set starts with call to unset
-//   [DONE] we should just unset symlinks, we should nto remove all versions as part of this
-// [DONE] get - should get by key by default and return the .data property of versioned object | cache should not have old versions
-// [DONE] keys - should only return non versioned key - and filter out additionalKeys
-// [DONE] exists - to return true is key resolves to file or symlink
-// [DONE] data - should work as expected once keys is fixed
-// [DONE] unset - remove all versions of data and properly handle symlinks too
-// [TODO] all 3 new api's should support query by additional keys also
 
 class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
   #localDir: string;
@@ -182,6 +165,41 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
     this.#versioned = versioned;
   }
 
+  async #loadIndex(): Promise<boolean> {
+    try {
+      const stat = await fs.stat(getIndexFilePath(this.#localDir));
+      if (stat.isFile()) {
+        const fileData = await fs.readFile(getIndexFilePath(this.#localDir), {
+          encoding: "utf8",
+        });
+        this.#indexMap = JSON.parse(fileData);
+        return Promise.resolve(true);
+      } else {
+        throw new Error(
+          `Index path is not a file! Something is very wrong here, please inspect this path: ${getIndexFilePath(
+            this.#localDir
+          )}`
+        );
+      }
+    } catch (e) {
+      console.log(`Failed to load index file with error ${e}`);
+      return Promise.resolve(false);
+    }
+  }
+
+  async #flushIndex(): Promise<boolean> {
+    try {
+      await fs.writeFile(
+        getIndexFilePath(this.#localDir),
+        JSON.stringify(this.#indexMap)
+      );
+      return Promise.resolve(true);
+    } catch (e) {
+      console.log(`Failed to write index file with error ${e}`);
+      return Promise.resolve(false);
+    }
+  }
+
   async #init() {
     if (this.#initComplete) {
       return; // no need to re-init
@@ -199,6 +217,7 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
           `Specified path ${this.#localDir} exists but is not a directory`
         );
       } else {
+        await this.#loadIndex();
         this.#initComplete = true;
       }
     }
@@ -213,6 +232,9 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
     const files = await fs.readdir(this.#localDir);
     const keys = [];
     for (const file of files) {
+      if (file === INDEX_FILE) {
+        continue;
+      }
       if (this.#versioned) {
         const stat = await fs.lstat(`${this.#localDir}/${file}`);
         // symlink points to the latest version
@@ -302,11 +324,15 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
     version?: number
   ): Promise<VersionedData<Type>> {
     await this.#init();
-    const exists = await this.exists(key, version);
+    const resolvedKey = this.#resolveKey(key);
+    const exists = await this.exists(resolvedKey, version);
     if (exists) {
-      const fileData = await fs.readFile(this.#getKeyPath(key, version), {
-        encoding: "utf8",
-      });
+      const fileData = await fs.readFile(
+        this.#getKeyPath(resolvedKey, version),
+        {
+          encoding: "utf8",
+        }
+      );
       const parsed = JSON.parse(fileData) as VersionedData<Type>;
       return Promise.resolve(parsed);
     }
@@ -314,9 +340,12 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
   }
 
   async #getNextVersion(key: string): Promise<number> {
+    const resolvedKey = this.#resolveKey(key);
     if (this.#versioned) {
-      if (await this.exists(key)) {
-        const data: VersionedData<Type> = await this.getVersionWithAudit(key);
+      if (await this.exists(resolvedKey)) {
+        const data: VersionedData<Type> = await this.getVersionWithAudit(
+          resolvedKey
+        );
         return Promise.resolve(data.version + 1);
       } else {
         return Promise.resolve(1); // initial version
@@ -332,10 +361,14 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
 
   async getAllVersions(key: string): Promise<Version[]> {
     await this.#init();
+    const resolvedKey = this.#resolveKey(key);
     const files = await fs.readdir(this.#localDir);
     const versionedFilesForKey: string[] = [];
     for (const file of files) {
-      if (file.includes(key)) {
+      if (file === INDEX_FILE) {
+        continue;
+      }
+      if (file.includes(resolvedKey)) {
         const stat = await fs.lstat(this.#getFilePath(file));
         if (!stat.isSymbolicLink()) {
           versionedFilesForKey.push(file);
@@ -397,16 +430,19 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
           await fs.symlink(filePath, this.#getKeyPath(key));
         }
       } catch (e) {
-        console.log(`Error setting additional keys, received exception ${e}`);
+        console.log(
+          `Error setting alias for key: ${key}, received exception ${e}`
+        );
         return Promise.resolve(false);
       }
       // generate indices and set into indexBiMap
       if (this.#indices?.length) {
         for (const indexPattern of this.#indices) {
-          const index = lget(value, indexPattern);
+          const index = "" + lget(value, indexPattern); // stringify
           this.#indexMap[index] = key;
         }
       }
+      await this.#flushIndex();
       return Promise.resolve(true);
     } catch (e) {
       console.log(`Error setting value, received exception ${e}`);
@@ -414,28 +450,29 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
     }
   }
 
-  async del(key: string): Promise<boolean> {
+  async delete(key: string): Promise<boolean> {
     await this.#init();
-    const value = await this.get(key);
+    const resolvedKey = this.#resolveKey(key);
+    const value = await this.get(resolvedKey);
     // clear out cache
     if (this.#versioned) {
       this.#cache
         .keys()
-        .filter((each) => each.includes(key))
+        .filter((each) => each.includes(resolvedKey))
         .forEach((each) => this.#cache?.del(each));
     } else {
-      this.#cache?.del(key);
+      this.#cache?.del(resolvedKey);
     }
     if (value) {
       try {
-        await this.#removeSymlink(this.#getKeyPath(key));
         if (this.#versioned) {
-          const versions = await this.getAllVersions(key);
+          await this.#removeSymlink(this.#getKeyPath(resolvedKey));
+          const versions = await this.getAllVersions(resolvedKey);
           for (const version of versions) {
-            await fs.rm(this.#getKeyPath(key, version.version));
+            await fs.rm(this.#getKeyPath(resolvedKey, version.version));
           }
         } else {
-          await fs.rm(this.#getKeyPath(key));
+          await fs.rm(this.#getKeyPath(resolvedKey));
         }
         // remove indices
         if (this.#indices?.length) {
@@ -444,9 +481,12 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
             delete this.#indexMap[index];
           }
         }
+        await this.#flushIndex();
         return Promise.resolve(true);
       } catch (e) {
-        console.log(`Error deleting key ${key}, received exception ${e}`);
+        console.log(
+          `Error deleting key ${resolvedKey}, received exception ${e}`
+        );
         return Promise.resolve(false);
       }
     }
@@ -475,12 +515,13 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
 
   async getWithJoins(key: string): Promise<any> {
     await this.#init();
+    const resolvedKey = this.#resolveKey(key);
     if (!Object.keys(this.#joins)?.length) {
       throw new Error(
         `No joins defined. Please create a join using 'createJoin' api.`
       );
     }
-    const leftData = await this.get(key);
+    const leftData = await this.get(resolvedKey);
     if (leftData === undefined) {
       return Promise.resolve(undefined);
     }
