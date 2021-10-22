@@ -42,7 +42,7 @@
   "devDependencies": {
     "@types/lru-cache": "^5.1.1",
     "@types/node": "^16.7.3",
-    "@types/tar": "^4.0.5",
+    "@types/tar": "^6.1.0",
     "codecov": "^3.8.3",
     "good-vibes": "^1.0.0",
     "nyc": "^15.1.0",
