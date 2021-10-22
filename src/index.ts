@@ -98,7 +98,7 @@ interface Version {
     [key: string]: string;
   };
   version: number;
-  updatedAt: number;
+  createdAt: number;
 }
 
 interface VersionedData<Type> extends Version {
@@ -383,7 +383,7 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
       const parsed = JSON.parse(fileData) as VersionedData<Type>;
       data.push({
         version: parsed.version,
-        updatedAt: parsed.updatedAt,
+        createdAt: parsed.createdAt,
         metadata: parsed.metadata,
       });
     }
@@ -412,7 +412,7 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
       if (this.#versioned) {
         const versionedData: VersionedData<Type> = {
           data: value,
-          updatedAt: new Date().valueOf(),
+          createdAt: new Date().valueOf(),
           version: nextVersion,
           metadata,
         };

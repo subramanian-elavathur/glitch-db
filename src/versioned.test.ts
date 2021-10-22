@@ -77,19 +77,19 @@ test("get all versions", async (c) => {
     "all gravity versions",
     (
       await glitchDB.getAllVersions("gravity")
-    ).map((each) => ({ ...each, updatedAt: undefined }))
+    ).map((each) => ({ ...each, createdAt: undefined }))
   );
   await c.snapshot(
     "all delicate versions by key",
     (
       await glitchDB.getAllVersions("Damien Rice")
-    ).map((each) => ({ ...each, updatedAt: undefined }))
+    ).map((each) => ({ ...each, createdAt: undefined }))
   );
   await c.snapshot(
     "all delicate versions",
     (
       await glitchDB.getAllVersions("delicate")
-    ).map((each) => ({ ...each, updatedAt: undefined }))
+    ).map((each) => ({ ...each, createdAt: undefined }))
   );
   c.done();
 });
@@ -104,11 +104,11 @@ test("get specific version", async (c) => {
 test("get version with audit", async (c) => {
   await c.snapshot("get gravity version 1", {
     ...(await glitchDB.getVersionWithAudit("gravity", 1)),
-    updatedAt: undefined,
+    createdAt: undefined,
   });
   await c.snapshot("get delicate version 1", {
     ...(await glitchDB.getVersionWithAudit("delicate")),
-    updatedAt: undefined,
+    createdAt: undefined,
   });
   await c.check(undefined, await glitchDB.getVersionWithAudit("gravity", 37));
   c.done();
