@@ -425,7 +425,7 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
         if (this.#versioned) {
           if (nextVersion !== 1) {
             // do not remove symlink if version is 1
-            this.#removeSymlink(this.#getKeyPath(key));
+            await this.#removeSymlink(this.#getKeyPath(key));
           }
           await fs.symlink(filePath, this.#getKeyPath(key));
         }
