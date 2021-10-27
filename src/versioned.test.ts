@@ -21,7 +21,7 @@ let tempDirectory: string;
 before(async (context) => {
   tempDirectory = path.join(os.tmpdir(), "glitch-versioned");
   context.log(`Created temp directory for tests at: ${tempDirectory}`);
-  glitchDB = new GlitchDB(tempDirectory).getVersionedPartition<TestData>(
+  glitchDB = new GlitchDB(tempDirectory, 5).getVersionedPartition<TestData>(
     "versioned",
     ["artist"]
   );
@@ -95,6 +95,7 @@ test("get all versions", async (c) => {
 });
 
 test("get specific version", async (c) => {
+  await c.snapshot("get gravity latest version", await glitchDB.get("gravity"));
   await c.snapshot("get gravity version 2", await glitchDB.get("gravity", 2));
   await c.snapshot("get delicate version 1", await glitchDB.get("delicate", 1));
   await c.check(undefined, await glitchDB.get("delicate", 46));

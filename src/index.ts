@@ -420,7 +420,10 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
       } else {
         await fs.writeFile(filePath, JSON.stringify(value));
       }
-      this.#cache?.set(this.#getCacheKey(key, nextVersion), value);
+      this.#cache?.set(key, value);
+      if (this.#versioned) {
+        this.#cache?.set(this.#getCacheKey(key, nextVersion), value);
+      }
       try {
         if (this.#versioned) {
           if (nextVersion !== 1) {
