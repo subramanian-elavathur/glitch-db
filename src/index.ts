@@ -105,6 +105,13 @@ interface VersionedData<Type> extends Version {
   data: Type;
 }
 
+interface Versioned<Type> {
+  latestVersion: number;
+  data: {
+    [key: number]: VersionedData<Type>;
+  };
+}
+
 export interface GlitchPartition<Type> {
   exists: (key: string, version?: number) => Promise<boolean>;
   get: (key: string, version?: number) => Promise<Type>;
@@ -126,11 +133,8 @@ export interface GlitchPartition<Type> {
 }
 
 export interface GlitchVersionedPartition<Type> extends GlitchPartition<Type> {
-  getVersionWithAudit: (
-    key: string,
-    version?: number
-  ) => Promise<VersionedData<Type>>;
-  getAllVersions: (key: string) => Promise<Version[]>;
+  getVersion: (key: string, version?: number) => Promise<VersionedData<Type>>;
+  getAllVersions: (key: string) => Promise<VersionedData<Type>[]>;
 }
 
 class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
@@ -182,7 +186,7 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
         );
       }
     } catch (e) {
-      console.log(`Failed to load index file with error ${e}`);
+      // console.log(`Failed to load index file with error ${e}`);
       return Promise.resolve(false);
     }
   }
@@ -230,83 +234,80 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
   async keys(): Promise<string[]> {
     await this.#init();
     const files = await fs.readdir(this.#localDir);
-    const keys = [];
-    for (const file of files) {
-      if (file === INDEX_FILE) {
-        continue;
-      }
-      if (this.#versioned) {
-        const stat = await fs.lstat(`${this.#localDir}/${file}`);
-        // symlink points to the latest version
-        if (stat.isSymbolicLink()) {
-          keys.push(this.#getKeyFromFile(file));
-        }
-      } else {
-        keys.push(this.#getKeyFromFile(file));
-      }
-    }
-    return keys;
+    return files
+      .filter((each) => each !== INDEX_FILE)
+      .map(this.#getKeyFromFile);
   }
 
-  #getCacheKey(key: string, version?: number) {
-    return version > 0 ? `${key}~${version}` : key;
-  }
-
-  #getKeyPath(key: string, version?: number): string {
-    return version
-      ? `${this.#localDir}/${key}.${version}.json`
-      : `${this.#localDir}/${key}.json`;
+  #getKeyPath(key: string): string {
+    return `${this.#localDir}/${key}.json`;
   }
 
   #resolveKey(key: string) {
     return this.#indexMap[key] ?? key;
   }
 
-  async exists(key: string, version?: number): Promise<boolean> {
+  async exists(key: string): Promise<boolean> {
     await this.#init();
     const resolvedKey = this.#resolveKey(key);
-    if (this.#cache?.has(this.#getCacheKey(resolvedKey, version))) {
+    if (this.#cache?.has(resolvedKey)) {
       return Promise.resolve(true);
     }
-    const keyPath = this.#getKeyPath(resolvedKey, version);
+    const keyPath = this.#getKeyPath(resolvedKey);
     try {
       const stat = await fs.stat(keyPath);
-      if (stat && (stat.isFile() || stat.isSymbolicLink())) {
+      if (stat && stat.isFile()) {
         return Promise.resolve(true);
       } else {
         return Promise.resolve(false);
       }
     } catch (e) {
+      // console.log(
+      //   `Could not stat file at ${keyPath} due to error ${e}. Its likely that this key does not exist.`
+      // );
       return Promise.resolve(false);
     }
   }
 
-  // todo find key from index
+  #getVersionFromFile(
+    file: Versioned<Type>,
+    version?: number
+  ): VersionedData<Type> {
+    return file?.data[version ?? file?.latestVersion];
+  }
+
   async get(key: string, version?: number): Promise<Type> {
     await this.#init();
     const resolvedKey = this.#resolveKey(key);
-    const cachedData = this.#cache?.get(
-      this.#getCacheKey(resolvedKey, version)
-    );
-    if (cachedData) {
-      return Promise.resolve(cachedData);
+    if (!version) {
+      const cachedData = this.#cache?.get(resolvedKey);
+      if (cachedData) {
+        return Promise.resolve(cachedData);
+      }
     }
-    const exists = await this.exists(resolvedKey, version);
-    if (exists) {
-      const fileData = await fs.readFile(
-        this.#getKeyPath(resolvedKey, version),
-        {
-          encoding: "utf8",
-        }
-      );
+    const keyPath = this.#getKeyPath(resolvedKey);
+    try {
+      const fileData = await fs.readFile(keyPath, {
+        encoding: "utf8",
+      });
       const parsed = JSON.parse(fileData);
-      const data = this.#versioned
-        ? (parsed as VersionedData<Type>).data
-        : parsed;
-      this.#cache?.set(this.#getCacheKey(resolvedKey, version), data);
-      return Promise.resolve(data);
+      if (this.#versioned) {
+        const data = parsed as Versioned<Type>;
+        const result = this.#getVersionFromFile(data, version);
+        if (!version) {
+          this.#cache?.set(resolvedKey, result?.data); // do not set old versions to cache
+        }
+        return Promise.resolve(result?.data);
+      } else {
+        this.#cache?.set(resolvedKey, parsed);
+        return Promise.resolve(parsed);
+      }
+    } catch (e) {
+      // console.log(
+      //   `Could not read file at ${keyPath} due to error ${e}. Its likely that this key does not exist.`
+      // );
+      return Promise.resolve(undefined);
     }
-    return Promise.resolve(undefined);
   }
 
   async data(): Promise<{ [key: string]: Type }> {
@@ -319,85 +320,61 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
     return data;
   }
 
-  async getVersionWithAudit(
-    key: string,
-    version?: number
-  ): Promise<VersionedData<Type>> {
-    await this.#init();
+  async #getVersionedData(key: string): Promise<Versioned<Type>> {
     const resolvedKey = this.#resolveKey(key);
-    const exists = await this.exists(resolvedKey, version);
-    if (exists) {
-      const fileData = await fs.readFile(
-        this.#getKeyPath(resolvedKey, version),
-        {
-          encoding: "utf8",
-        }
-      );
-      const parsed = JSON.parse(fileData) as VersionedData<Type>;
+    const keyPath = this.#getKeyPath(resolvedKey);
+    try {
+      const fileData = await fs.readFile(keyPath, {
+        encoding: "utf8",
+      });
+      const parsed = JSON.parse(fileData) as Versioned<Type>;
       return Promise.resolve(parsed);
-    }
-    return Promise.resolve(undefined);
-  }
-
-  async #getNextVersion(key: string): Promise<number> {
-    const resolvedKey = this.#resolveKey(key);
-    if (this.#versioned) {
-      if (await this.exists(resolvedKey)) {
-        const data: VersionedData<Type> = await this.getVersionWithAudit(
-          resolvedKey
-        );
-        return Promise.resolve(data.version + 1);
-      } else {
-        return Promise.resolve(1); // initial version
-      }
-    } else {
+    } catch (e) {
+      // console.log(
+      //   `Could not read file at ${keyPath} due to error ${e}. Its likely that this key does not exist.`
+      // );
       return Promise.resolve(undefined);
     }
   }
 
-  #getFilePath(file: string): string {
-    return `${this.#localDir}/${file}`;
-  }
-
-  async getAllVersions(key: string): Promise<Version[]> {
+  async getVersion(
+    key: string,
+    version?: number
+  ): Promise<VersionedData<Type>> {
     await this.#init();
-    const resolvedKey = this.#resolveKey(key);
-    const files = await fs.readdir(this.#localDir);
-    const versionedFilesForKey: string[] = [];
-    for (const file of files) {
-      if (file === INDEX_FILE) {
-        continue;
-      }
-      if (file.includes(resolvedKey)) {
-        const stat = await fs.lstat(this.#getFilePath(file));
-        if (!stat.isSymbolicLink()) {
-          versionedFilesForKey.push(file);
-        }
-      }
-    }
-    const data: Version[] = [];
-    for (const version of versionedFilesForKey) {
-      const fileData = await fs.readFile(this.#getFilePath(version), {
-        encoding: "utf8",
-      });
-      const parsed = JSON.parse(fileData) as VersionedData<Type>;
-      data.push({
-        version: parsed.version,
-        createdAt: parsed.createdAt,
-        metadata: parsed.metadata,
-      });
-    }
-    return Promise.resolve(data);
+    return Promise.resolve(
+      this.#getVersionFromFile(await this.#getVersionedData(key), version)
+    );
   }
 
-  async #removeSymlink(name: string): Promise<boolean> {
-    try {
-      await fs.unlink(name);
+  async getAllVersions(key: string): Promise<VersionedData<Type>[]> {
+    await this.#init();
+    const data = await this.#getVersionedData(key);
+    return Promise.resolve(data?.data ? Object.values(data.data) : undefined);
+  }
+
+  async #setIndices(key: string, value: Type): Promise<boolean> {
+    if (this.#indices?.length) {
+      for (const indexPattern of this.#indices) {
+        const index = "" + lget(value, indexPattern); // stringify
+        this.#indexMap[index] = key;
+      }
+      await this.#flushIndex();
       return Promise.resolve(true);
-    } catch (e) {
-      console.log(`Error removing symlink, received exception ${e}`);
-      return Promise.resolve(false);
     }
+    return Promise.resolve(false);
+  }
+
+  async #deleteIndices(value: Type) {
+    if (this.#indices?.length) {
+      for (const indexPattern of this.#indices) {
+        const index = lget(value, indexPattern);
+        delete this.#indexMap[index];
+      }
+      await this.#flushIndex();
+      return Promise.resolve(true);
+    }
+    return Promise.resolve(false);
   }
 
   async set(
@@ -406,50 +383,40 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
     metadata?: { [key: string]: string }
   ): Promise<boolean> {
     await this.#init();
-    const nextVersion = await this.#getNextVersion(key);
-    const filePath = this.#getKeyPath(key, nextVersion);
     try {
       if (this.#versioned) {
-        const versionedData: VersionedData<Type> = {
+        let data = await this.#getVersionedData(key);
+        if (data) {
+          await this.#deleteIndices(this.#getVersionFromFile(data)?.data);
+          data.latestVersion = data.latestVersion + 1;
+        } else {
+          data = {
+            latestVersion: 1,
+            data: {},
+          };
+        }
+        data.data[data.latestVersion] = {
           data: value,
           createdAt: new Date().valueOf(),
-          version: nextVersion,
+          version: data.latestVersion,
           metadata,
         };
-        await fs.writeFile(filePath, JSON.stringify(versionedData));
+        await fs.writeFile(this.#getKeyPath(key), JSON.stringify(data));
       } else {
-        await fs.writeFile(filePath, JSON.stringify(value));
+        if (await this.exists(key)) {
+          await this.#deleteIndices(await this.get(key));
+        }
+        await fs.writeFile(this.#getKeyPath(key), JSON.stringify(value));
       }
+      await this.#setIndices(key, value);
       this.#cache?.set(key, value);
       if (this.#versioned) {
-        this.#cache?.set(this.#getCacheKey(key, nextVersion), value);
+        this.#cache?.set(key, value);
       }
-      try {
-        if (this.#versioned) {
-          if (nextVersion !== 1) {
-            // do not remove symlink if version is 1
-            await this.#removeSymlink(this.#getKeyPath(key));
-          }
-          await fs.symlink(filePath, this.#getKeyPath(key));
-        }
-      } catch (e) {
-        console.log(
-          `Error setting alias for key: ${key}, received exception ${e}`
-        );
-        return Promise.resolve(false);
-      }
-      // generate indices and set into indexBiMap
-      if (this.#indices?.length) {
-        for (const indexPattern of this.#indices) {
-          const index = "" + lget(value, indexPattern); // stringify
-          this.#indexMap[index] = key;
-        }
-      }
-      await this.#flushIndex();
       return Promise.resolve(true);
-    } catch (e) {
-      console.log(`Error setting value, received exception ${e}`);
-      Promise.resolve(false);
+    } catch (error) {
+      console.log(`Error setting value for key: ${key}, due to error ${error}`);
+      return Promise.resolve(false);
     }
   }
 
@@ -457,34 +424,11 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
     await this.#init();
     const resolvedKey = this.#resolveKey(key);
     const value = await this.get(resolvedKey);
-    // clear out cache
-    if (this.#versioned) {
-      this.#cache
-        .keys()
-        .filter((each) => each.includes(resolvedKey))
-        .forEach((each) => this.#cache?.del(each));
-    } else {
-      this.#cache?.del(resolvedKey);
-    }
+    this.#cache?.del(resolvedKey);
     if (value) {
       try {
-        if (this.#versioned) {
-          await this.#removeSymlink(this.#getKeyPath(resolvedKey));
-          const versions = await this.getAllVersions(resolvedKey);
-          for (const version of versions) {
-            await fs.rm(this.#getKeyPath(resolvedKey, version.version));
-          }
-        } else {
-          await fs.rm(this.#getKeyPath(resolvedKey));
-        }
-        // remove indices
-        if (this.#indices?.length) {
-          for (const indexPattern of this.#indices) {
-            const index = lget(value, indexPattern);
-            delete this.#indexMap[index];
-          }
-        }
-        await this.#flushIndex();
+        await fs.rm(this.#getKeyPath(resolvedKey));
+        await this.#deleteIndices(value);
         return Promise.resolve(true);
       } catch (e) {
         console.log(
@@ -493,7 +437,7 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
         return Promise.resolve(false);
       }
     }
-    return Promise.resolve(true);
+    return Promise.resolve(false);
   }
 
   createJoin(

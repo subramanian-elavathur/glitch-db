@@ -21,7 +21,7 @@ let tempDirectory: string;
 before(async (context) => {
   tempDirectory = path.join(os.tmpdir(), "glitch-versioned");
   context.log(`Created temp directory for tests at: ${tempDirectory}`);
-  glitchDB = new GlitchDB(tempDirectory, 5).getVersionedPartition<TestData>(
+  glitchDB = new GlitchDB(tempDirectory, 0).getVersionedPartition<TestData>(
     "versioned",
     ["artist"]
   );
@@ -104,14 +104,14 @@ test("get specific version", async (c) => {
 
 test("get version with audit", async (c) => {
   await c.snapshot("get gravity version 1", {
-    ...(await glitchDB.getVersionWithAudit("gravity", 1)),
+    ...(await glitchDB.getVersion("gravity", 1)),
     createdAt: undefined,
   });
   await c.snapshot("get delicate version 1", {
-    ...(await glitchDB.getVersionWithAudit("delicate")),
+    ...(await glitchDB.getVersion("delicate")),
     createdAt: undefined,
   });
-  await c.check(undefined, await glitchDB.getVersionWithAudit("gravity", 37));
+  await c.check(undefined, await glitchDB.getVersion("gravity", 37));
   c.done();
 });
 
@@ -127,7 +127,7 @@ test("data", async (c) => {
 
 test("delete", async (c) => {
   await glitchDB.delete("gravity");
-  c.check([], await glitchDB.getAllVersions("gravity"));
+  c.check(undefined, await glitchDB.getAllVersions("gravity"));
   c.check(undefined, await glitchDB.get("gravity"));
   c.check(undefined, await glitchDB.get("John Mayerz"));
   c.check(undefined, await glitchDB.get("gravity", 1));

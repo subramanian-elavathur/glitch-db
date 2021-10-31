@@ -32,6 +32,11 @@ before(async (context) => {
       manufacturer: "Tesla",
     });
   }
+  // reset GlitchDB to load data from index file
+  glitchDB = new GlitchDB(tempDirectory, 0).getPartition<Cars>("index", [
+    "name",
+    "year",
+  ]);
   context.log(`Glitch DB setup complete`);
   context.done();
 });
