@@ -3,7 +3,7 @@ import * as path from "path";
 import * as os from "os";
 import { group } from "good-vibes";
 
-import GlitchDB, { GlitchVersionedPartition } from ".";
+import GlitchDB, { GlitchUnitemporallyVersionedPartition } from ".";
 
 const { before, test, after, sync } = group("versioned");
 
@@ -15,7 +15,7 @@ interface TestData {
   lengthInSeconds: number;
 }
 
-let glitchDB: GlitchVersionedPartition<TestData>;
+let glitchDB: GlitchUnitemporallyVersionedPartition<TestData>;
 let tempDirectory: string;
 
 before(async (context) => {
@@ -77,19 +77,19 @@ test("get all versions", async (c) => {
     "all gravity versions",
     (
       await glitchDB.getAllVersions("gravity")
-    ).map((each) => ({ ...each, createdAt: undefined }))
+    ).map((each) => ({ ...each, createdAt: undefined, deletedAt: undefined }))
   );
   await c.snapshot(
     "all delicate versions by key",
     (
       await glitchDB.getAllVersions("Damien Rice")
-    ).map((each) => ({ ...each, createdAt: undefined }))
+    ).map((each) => ({ ...each, createdAt: undefined, deletedAt: undefined }))
   );
   await c.snapshot(
     "all delicate versions",
     (
       await glitchDB.getAllVersions("delicate")
-    ).map((each) => ({ ...each, createdAt: undefined }))
+    ).map((each) => ({ ...each, createdAt: undefined, deletedAt: undefined }))
   );
   c.done();
 });
@@ -103,13 +103,22 @@ test("get specific version", async (c) => {
 });
 
 test("get version with audit", async (c) => {
+  const gravity1 = await glitchDB.getVersion("gravity", 1);
+  c.check(true, gravity1.deletedAt > 1);
+  c.check(true, gravity1.createdAt > 1);
+  c.check(true, gravity1.createdAt < gravity1.deletedAt);
   await c.snapshot("get gravity version 1", {
-    ...(await glitchDB.getVersion("gravity", 1)),
+    ...gravity1,
     createdAt: undefined,
+    deletedAt: undefined,
   });
+  const delicate = await glitchDB.getVersion("delicate");
+  c.check(-1, delicate.deletedAt);
+  c.check(true, delicate.createdAt > 1);
   await c.snapshot("get delicate version 1", {
-    ...(await glitchDB.getVersion("delicate")),
+    ...delicate,
     createdAt: undefined,
+    deletedAt: undefined,
   });
   await c.check(undefined, await glitchDB.getVersion("gravity", 37));
   c.done();

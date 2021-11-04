@@ -69,7 +69,7 @@ export default class GlitchDB {
     name: string,
     indices?: string[],
     cacheSize?: number
-  ): GlitchVersionedPartition<Type> {
+  ): GlitchUnitemporallyVersionedPartition<Type> {
     const cacheSizeWithDefault = cacheSize ?? this.#defaultCacheSize;
     this.#partitions[name] = {
       name,
@@ -86,6 +86,8 @@ export default class GlitchDB {
   }
 }
 
+const INFINITY_TIME = -1;
+
 interface Joiner {
   db: string;
   leftKey: string;
@@ -93,22 +95,41 @@ interface Joiner {
   joinName: string;
 }
 
-interface Version {
+interface UnitemporalVersion {
   metadata?: {
     [key: string]: string;
   };
   version: number;
   createdAt: number;
+  deletedAt: number;
 }
 
-interface VersionedData<Type> extends Version {
+interface UnitemporallyVersionedData<Type> extends UnitemporalVersion {
   data: Type;
 }
 
-interface Versioned<Type> {
+interface UnitemporallyVersioned<Type> {
   latestVersion: number;
   data: {
-    [key: number]: VersionedData<Type>;
+    [key: number]: UnitemporallyVersionedData<Type>;
+  };
+}
+
+interface BitemporalVersion extends UnitemporalVersion {
+  validFrom: number;
+  validTo: number;
+}
+
+interface BitemporallyVersionedData<Type> extends BitemporalVersion {
+  data: Type;
+}
+
+interface BitemporallyVersioned<Type> {
+  rangeMap: {
+    [validFrom: number]: number; // validFrom to version number map
+  };
+  data: {
+    [key: number]: BitemporallyVersionedData<Type>;
   };
 }
 
@@ -132,12 +153,18 @@ export interface GlitchPartition<Type> {
   getWithJoins: (key: string) => Promise<any>;
 }
 
-export interface GlitchVersionedPartition<Type> extends GlitchPartition<Type> {
-  getVersion: (key: string, version?: number) => Promise<VersionedData<Type>>;
-  getAllVersions: (key: string) => Promise<VersionedData<Type>[]>;
+export interface GlitchUnitemporallyVersionedPartition<Type>
+  extends GlitchPartition<Type> {
+  getVersion: (
+    key: string,
+    version?: number
+  ) => Promise<UnitemporallyVersionedData<Type>>;
+  getAllVersions: (key: string) => Promise<UnitemporallyVersionedData<Type>[]>;
 }
 
-class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
+class GlitchPartitionImpl<Type>
+  implements GlitchUnitemporallyVersionedPartition<Type>
+{
   #localDir: string;
   #initComplete: boolean;
   #indices: string[];
@@ -270,9 +297,9 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
   }
 
   #getVersionFromFile(
-    file: Versioned<Type>,
+    file: UnitemporallyVersioned<Type>,
     version?: number
-  ): VersionedData<Type> {
+  ): UnitemporallyVersionedData<Type> {
     return file?.data[version ?? file?.latestVersion];
   }
 
@@ -292,7 +319,7 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
       });
       const parsed = JSON.parse(fileData);
       if (this.#versioned) {
-        const data = parsed as Versioned<Type>;
+        const data = parsed as UnitemporallyVersioned<Type>;
         const result = this.#getVersionFromFile(data, version);
         if (!version) {
           this.#cache?.set(resolvedKey, result?.data); // do not set old versions to cache
@@ -320,14 +347,14 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
     return data;
   }
 
-  async #getVersionedData(key: string): Promise<Versioned<Type>> {
+  async #getVersionedData(key: string): Promise<UnitemporallyVersioned<Type>> {
     const resolvedKey = this.#resolveKey(key);
     const keyPath = this.#getKeyPath(resolvedKey);
     try {
       const fileData = await fs.readFile(keyPath, {
         encoding: "utf8",
       });
-      const parsed = JSON.parse(fileData) as Versioned<Type>;
+      const parsed = JSON.parse(fileData) as UnitemporallyVersioned<Type>;
       return Promise.resolve(parsed);
     } catch (e) {
       // console.log(
@@ -340,14 +367,16 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
   async getVersion(
     key: string,
     version?: number
-  ): Promise<VersionedData<Type>> {
+  ): Promise<UnitemporallyVersionedData<Type>> {
     await this.#init();
     return Promise.resolve(
       this.#getVersionFromFile(await this.#getVersionedData(key), version)
     );
   }
 
-  async getAllVersions(key: string): Promise<VersionedData<Type>[]> {
+  async getAllVersions(
+    key: string
+  ): Promise<UnitemporallyVersionedData<Type>[]> {
     await this.#init();
     const data = await this.#getVersionedData(key);
     return Promise.resolve(data?.data ? Object.values(data.data) : undefined);
@@ -397,9 +426,17 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
             data: {},
           };
         }
+        const currentTime = new Date().valueOf();
+        if (data.latestVersion !== 1) {
+          data.data[data.latestVersion - 1] = {
+            ...data.data[data.latestVersion - 1],
+            deletedAt: currentTime,
+          };
+        }
         data.data[data.latestVersion] = {
           data: value,
-          createdAt: new Date().valueOf(),
+          createdAt: currentTime,
+          deletedAt: INFINITY_TIME,
           version: data.latestVersion,
           metadata,
         };
