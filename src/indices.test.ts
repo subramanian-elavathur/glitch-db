@@ -24,6 +24,7 @@ before(async (context) => {
   glitchDB = new GlitchDB(tempDirectory, 0).getPartition<Cars>("index", [
     "name",
     "year",
+    "unknown",
   ]);
   for (let i = 0; i < CACHE_SIZE; i++) {
     await glitchDB.set(`key-${i}`, {

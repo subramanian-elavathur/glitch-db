@@ -356,8 +356,10 @@ class GlitchPartitionImpl<Type> implements GlitchVersionedPartition<Type> {
   async #setIndices(key: string, value: Type): Promise<boolean> {
     if (this.#indices?.length) {
       for (const indexPattern of this.#indices) {
-        const index = "" + lget(value, indexPattern); // stringify
-        this.#indexMap[index] = key;
+        const index = lget(value, indexPattern);
+        if (index !== undefined) {
+          this.#indexMap["" + index] = key;
+        }
       }
       await this.#flushIndex();
       return Promise.resolve(true);
