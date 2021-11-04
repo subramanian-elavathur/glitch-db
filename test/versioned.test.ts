@@ -3,7 +3,7 @@ import * as path from "path";
 import * as os from "os";
 import { group } from "good-vibes";
 
-import GlitchDB, { GlitchUnitemporallyVersionedPartition } from ".";
+import GlitchDB, { GlitchUnitemporallyVersionedPartition } from "../src";
 
 const { before, test, after, sync } = group("versioned");
 

@@ -2,7 +2,7 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import * as os from "os";
 import { group } from "good-vibes";
-import GlitchDB, { GlitchPartition } from "./index";
+import GlitchDB, { GlitchPartition } from "../src";
 
 let tempDirectory: string;
 const { before, test, after, sync } = group("joins");

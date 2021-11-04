@@ -4,7 +4,7 @@ import * as path from "path";
 import * as os from "os";
 import { group } from "good-vibes";
 
-import GlitchDB, { GlitchPartition } from ".";
+import GlitchDB, { GlitchPartition } from "../src";
 import Context from "good-vibes/typings/Context";
 
 const { before, test, after, sync } = group("Cached");

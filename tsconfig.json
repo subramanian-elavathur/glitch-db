@@ -1,7 +1,7 @@
 {
     "compilerOptions": {
       "outDir": "lib/",
-      "rootDir": "src/",
+      "rootDirs": ["src/", "test/"],
       "sourceMap": true,
       "target": "ES2020",
       "listEmittedFiles": true,
