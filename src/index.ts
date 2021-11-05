@@ -1,7 +1,7 @@
 import LRUCache = require("lru-cache");
 import tar = require("tar");
 import lget = require("lodash.get");
-const fs = require("fs/promises");
+import fs = require("fs/promises");
 
 const DEFAULT_CACHE_SIZE = 1000;
 const INDEX_FILE = "__index__.json";
@@ -511,7 +511,7 @@ class GlitchPartitionImpl<Type>
     if (leftData === undefined) {
       return Promise.resolve(undefined);
     }
-    let joinedData = {};
+    const joinedData = {};
     for (const rightKey of Object.keys(this.#joins)) {
       const joiner = this.#joins[rightKey];
       const db = this.#master.getPartitionByName(joiner.db);
