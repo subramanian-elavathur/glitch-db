@@ -24,9 +24,11 @@ export default class GlitchDB {
     this.#partitions = {};
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   getPartitionByName(name: string): GlitchPartition<any> {
     if (name in this.#partitions) {
       const partition = this.#partitions[name];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return this.getPartition<any>(partition.name, null, partition.cache);
     }
     throw new Error(`Glitch Partition with name ${name} not found`);
@@ -150,6 +152,7 @@ export interface GlitchPartition<Type> {
     leftKey: string,
     rightKey?: string
   ) => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   getWithJoins: (key: string) => Promise<any>;
 }
 
@@ -499,6 +502,7 @@ class GlitchPartitionImpl<Type>
     };
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async getWithJoins(key: string): Promise<any> {
     await this.#init();
     const resolvedKey = this.#resolveKey(key);
