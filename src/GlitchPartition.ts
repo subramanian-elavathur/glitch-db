@@ -1,7 +1,7 @@
 import LRUCache = require("lru-cache");
 import lget = require("lodash.get");
 import fs = require("fs/promises");
-import { INDEX_FILE, INFINITY_TIME } from "./constants";
+import { INDEX_FILE } from "./constants";
 import GlitchDB from "./GlitchDB";
 
 const getIndexFilePath = (dir: string) => `${dir}/${INDEX_FILE}`;
@@ -13,54 +13,12 @@ interface Joiner {
   joinName: string;
 }
 
-interface UnitemporalVersion {
-  metadata?: {
-    [key: string]: string;
-  };
-  version: number;
-  createdAt: number;
-  deletedAt: number;
-}
-
-interface UnitemporallyVersionedData<Type> extends UnitemporalVersion {
-  data: Type;
-}
-
-interface UnitemporallyVersioned<Type> {
-  latestVersion: number;
-  data: {
-    [key: number]: UnitemporallyVersionedData<Type>;
-  };
-}
-
-interface BitemporalVersion extends UnitemporalVersion {
-  validFrom: number;
-  validTo: number;
-}
-
-interface BitemporallyVersionedData<Type> extends BitemporalVersion {
-  data: Type;
-}
-
-interface BitemporallyVersioned<Type> {
-  rangeMap: {
-    [validFrom: number]: number; // validFrom to version number map
-  };
-  data: {
-    [key: number]: BitemporallyVersionedData<Type>;
-  };
-}
-
 export interface GlitchPartition<Type> {
   exists: (key: string, version?: number) => Promise<boolean>;
-  get: (key: string, version?: number) => Promise<Type>;
+  get: (key: string) => Promise<Type>;
   keys: () => Promise<string[]>;
   data: () => Promise<{ [key: string]: Type }>;
-  set: (
-    key: string,
-    value: Type,
-    metadata?: { [key: string]: string }
-  ) => Promise<boolean>;
+  set: (key: string, value: Type) => Promise<boolean>;
   delete: (key: string) => Promise<boolean>;
   createJoin: (
     db: string,
@@ -72,17 +30,8 @@ export interface GlitchPartition<Type> {
   getWithJoins: (key: string) => Promise<any>;
 }
 
-export interface GlitchUnitemporallyVersionedPartition<Type>
-  extends GlitchPartition<Type> {
-  getVersion: (
-    key: string,
-    version?: number
-  ) => Promise<UnitemporallyVersionedData<Type>>;
-  getAllVersions: (key: string) => Promise<UnitemporallyVersionedData<Type>[]>;
-}
-
 export default class GlitchPartitionImpl<Type>
-  implements GlitchUnitemporallyVersionedPartition<Type>
+  implements GlitchPartition<Type>
 {
   #localDir: string;
   #initComplete: boolean;
@@ -93,26 +42,23 @@ export default class GlitchPartitionImpl<Type>
   #joins: {
     [joinName: string]: Joiner;
   };
-  #cache: LRUCache<string, Type>; // cache always maintains the latest data
+  protected cache: LRUCache<string, Type>; // cache always maintains the latest data
   #master: GlitchDB;
-  #versioned: boolean;
 
   constructor(
     master: GlitchDB,
     localDir: string,
     cacheSize?: number,
-    indices?: string[],
-    versioned?: boolean
+    indices?: string[]
   ) {
     this.#master = master;
     this.#localDir = localDir;
     this.#joins = {};
     if (cacheSize > 0) {
-      this.#cache = new LRUCache(cacheSize);
+      this.cache = new LRUCache(cacheSize);
     }
     this.#indices = indices;
     this.#indexMap = {};
-    this.#versioned = versioned;
   }
 
   async #loadIndex(): Promise<boolean> {
@@ -150,7 +96,7 @@ export default class GlitchPartitionImpl<Type>
     }
   }
 
-  async #init() {
+  protected async init() {
     if (this.#initComplete) {
       return; // no need to re-init
     }
@@ -178,28 +124,28 @@ export default class GlitchPartitionImpl<Type>
   }
 
   async keys(): Promise<string[]> {
-    await this.#init();
+    await this.init();
     const files = await fs.readdir(this.#localDir);
     return files
       .filter((each) => each !== INDEX_FILE)
       .map(this.#getKeyFromFile);
   }
 
-  #getKeyPath(key: string): string {
+  protected getKeyPath(key: string): string {
     return `${this.#localDir}/${key}.json`;
   }
 
-  #resolveKey(key: string) {
+  protected resolveKey(key: string) {
     return this.#indexMap[key] ?? key;
   }
 
   async exists(key: string): Promise<boolean> {
-    await this.#init();
-    const resolvedKey = this.#resolveKey(key);
-    if (this.#cache?.has(resolvedKey)) {
+    await this.init();
+    const resolvedKey = this.resolveKey(key);
+    if (this.cache?.has(resolvedKey)) {
       return Promise.resolve(true);
     }
-    const keyPath = this.#getKeyPath(resolvedKey);
+    const keyPath = this.getKeyPath(resolvedKey);
     try {
       const stat = await fs.stat(keyPath);
       if (stat && stat.isFile()) {
@@ -215,65 +161,20 @@ export default class GlitchPartitionImpl<Type>
     }
   }
 
-  #getVersionFromFile(
-    file: UnitemporallyVersioned<Type>,
-    version?: number
-  ): UnitemporallyVersionedData<Type> {
-    return file?.data[version ?? file?.latestVersion];
-  }
-
-  async get(key: string, version?: number): Promise<Type> {
-    await this.#init();
-    const resolvedKey = this.#resolveKey(key);
-    if (!version) {
-      const cachedData = this.#cache?.get(resolvedKey);
-      if (cachedData) {
-        return Promise.resolve(cachedData);
-      }
+  async get(key: string): Promise<Type> {
+    await this.init();
+    const resolvedKey = this.resolveKey(key);
+    const cachedData = this.cache?.get(resolvedKey);
+    if (cachedData) {
+      return Promise.resolve(cachedData);
     }
-    const keyPath = this.#getKeyPath(resolvedKey);
+    const keyPath = this.getKeyPath(resolvedKey);
     try {
       const fileData = await fs.readFile(keyPath, {
         encoding: "utf8",
       });
       const parsed = JSON.parse(fileData);
-      if (this.#versioned) {
-        const data = parsed as UnitemporallyVersioned<Type>;
-        const result = this.#getVersionFromFile(data, version);
-        if (!version) {
-          this.#cache?.set(resolvedKey, result?.data); // do not set old versions to cache
-        }
-        return Promise.resolve(result?.data);
-      } else {
-        this.#cache?.set(resolvedKey, parsed);
-        return Promise.resolve(parsed);
-      }
-    } catch (e) {
-      // console.log(
-      //   `Could not read file at ${keyPath} due to error ${e}. Its likely that this key does not exist.`
-      // );
-      return Promise.resolve(undefined);
-    }
-  }
-
-  async data(): Promise<{ [key: string]: Type }> {
-    await this.#init();
-    const keys = await this.keys();
-    const data = {};
-    for (const key of keys) {
-      data[key] = await this.get(key);
-    }
-    return data;
-  }
-
-  async #getVersionedData(key: string): Promise<UnitemporallyVersioned<Type>> {
-    const resolvedKey = this.#resolveKey(key);
-    const keyPath = this.#getKeyPath(resolvedKey);
-    try {
-      const fileData = await fs.readFile(keyPath, {
-        encoding: "utf8",
-      });
-      const parsed = JSON.parse(fileData) as UnitemporallyVersioned<Type>;
+      this.cache?.set(resolvedKey, parsed);
       return Promise.resolve(parsed);
     } catch (e) {
       // console.log(
@@ -283,25 +184,17 @@ export default class GlitchPartitionImpl<Type>
     }
   }
 
-  async getVersion(
-    key: string,
-    version?: number
-  ): Promise<UnitemporallyVersionedData<Type>> {
-    await this.#init();
-    return Promise.resolve(
-      this.#getVersionFromFile(await this.#getVersionedData(key), version)
-    );
+  async data(): Promise<{ [key: string]: Type }> {
+    await this.init();
+    const keys = await this.keys();
+    const data = {};
+    for (const key of keys) {
+      data[key] = await this.get(key);
+    }
+    return data;
   }
 
-  async getAllVersions(
-    key: string
-  ): Promise<UnitemporallyVersionedData<Type>[]> {
-    await this.#init();
-    const data = await this.#getVersionedData(key);
-    return Promise.resolve(data?.data ? Object.values(data.data) : undefined);
-  }
-
-  async #setIndices(key: string, value: Type): Promise<boolean> {
+  protected async setIndices(key: string, value: Type): Promise<boolean> {
     if (this.#indices?.length) {
       for (const indexPattern of this.#indices) {
         const index = lget(value, indexPattern);
@@ -315,7 +208,7 @@ export default class GlitchPartitionImpl<Type>
     return Promise.resolve(false);
   }
 
-  async #deleteIndices(value: Type) {
+  protected async deleteIndices(value: Type) {
     if (this.#indices?.length) {
       for (const indexPattern of this.#indices) {
         const index = lget(value, indexPattern);
@@ -327,50 +220,15 @@ export default class GlitchPartitionImpl<Type>
     return Promise.resolve(false);
   }
 
-  async set(
-    key: string,
-    value: Type,
-    metadata?: { [key: string]: string }
-  ): Promise<boolean> {
-    await this.#init();
+  async set(key: string, value: Type): Promise<boolean> {
+    await this.init();
     try {
-      if (this.#versioned) {
-        let data = await this.#getVersionedData(key);
-        if (data) {
-          await this.#deleteIndices(this.#getVersionFromFile(data)?.data);
-          data.latestVersion = data.latestVersion + 1;
-        } else {
-          data = {
-            latestVersion: 1,
-            data: {},
-          };
-        }
-        const currentTime = new Date().valueOf();
-        if (data.latestVersion !== 1) {
-          data.data[data.latestVersion - 1] = {
-            ...data.data[data.latestVersion - 1],
-            deletedAt: currentTime,
-          };
-        }
-        data.data[data.latestVersion] = {
-          data: value,
-          createdAt: currentTime,
-          deletedAt: INFINITY_TIME,
-          version: data.latestVersion,
-          metadata,
-        };
-        await fs.writeFile(this.#getKeyPath(key), JSON.stringify(data));
-      } else {
-        if (await this.exists(key)) {
-          await this.#deleteIndices(await this.get(key));
-        }
-        await fs.writeFile(this.#getKeyPath(key), JSON.stringify(value));
+      if (await this.exists(key)) {
+        await this.deleteIndices(await this.get(key));
       }
-      await this.#setIndices(key, value);
-      this.#cache?.set(key, value);
-      if (this.#versioned) {
-        this.#cache?.set(key, value);
-      }
+      await fs.writeFile(this.getKeyPath(key), JSON.stringify(value));
+      await this.setIndices(key, value);
+      this.cache?.set(key, value);
       return Promise.resolve(true);
     } catch (error) {
       console.log(`Error setting value for key: ${key}, due to error ${error}`);
@@ -379,14 +237,14 @@ export default class GlitchPartitionImpl<Type>
   }
 
   async delete(key: string): Promise<boolean> {
-    await this.#init();
-    const resolvedKey = this.#resolveKey(key);
+    await this.init();
+    const resolvedKey = this.resolveKey(key);
     const value = await this.get(resolvedKey);
-    this.#cache?.del(resolvedKey);
+    this.cache?.del(resolvedKey);
     if (value) {
       try {
-        await fs.rm(this.#getKeyPath(resolvedKey));
-        await this.#deleteIndices(value);
+        await fs.rm(this.getKeyPath(resolvedKey));
+        await this.deleteIndices(value);
         return Promise.resolve(true);
       } catch (e) {
         console.log(
@@ -420,8 +278,8 @@ export default class GlitchPartitionImpl<Type>
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async getWithJoins(key: string): Promise<any> {
-    await this.#init();
-    const resolvedKey = this.#resolveKey(key);
+    await this.init();
+    const resolvedKey = this.resolveKey(key);
     if (!Object.keys(this.#joins)?.length) {
       throw new Error(
         `No joins defined. Please create a join using 'createJoin' api.`

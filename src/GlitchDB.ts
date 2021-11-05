@@ -1,9 +1,9 @@
 import tar = require("tar");
 import { DEFAULT_CACHE_SIZE } from "./constants";
-import GlitchPartitionImpl, {
-  GlitchPartition,
-  GlitchUnitemporallyVersionedPartition,
-} from "./GlitchPartition";
+import GlitchPartitionImpl, { GlitchPartition } from "./GlitchPartition";
+import GlitchUniTemporalPartitionImpl, {
+  GlitchUnitemporalPartition,
+} from "./GlitchUnitemporalPartition";
 
 export default class GlitchDB {
   #baseDir: string;
@@ -69,19 +69,18 @@ export default class GlitchDB {
     name: string,
     indices?: string[],
     cacheSize?: number
-  ): GlitchUnitemporallyVersionedPartition<Type> {
+  ): GlitchUnitemporalPartition<Type> {
     const cacheSizeWithDefault = cacheSize ?? this.#defaultCacheSize;
     this.#partitions[name] = {
       name,
       cache: cacheSizeWithDefault,
       versioned: true,
     };
-    return new GlitchPartitionImpl<Type>(
+    return new GlitchUniTemporalPartitionImpl<Type>(
       this,
       `${this.#baseDir}/${name}`,
       cacheSizeWithDefault,
-      indices,
-      true
+      indices
     );
   }
 }

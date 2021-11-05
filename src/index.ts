@@ -1,8 +1,5 @@
 import GlitchDB from "./GlitchDB";
 
-export {
-  GlitchPartition,
-  GlitchUnitemporallyVersionedPartition,
-} from "./GlitchPartition";
-
+export { GlitchPartition } from "./GlitchPartition";
+export { GlitchUnitemporalPartition } from "./GlitchUnitemporalPartition";
 export default GlitchDB;

@@ -3,7 +3,7 @@ import * as path from "path";
 import * as os from "os";
 import { group } from "good-vibes";
 
-import GlitchDB, { GlitchUnitemporallyVersionedPartition } from "../src";
+import GlitchDB, { GlitchUnitemporalPartition } from "../src";
 
 const { before, test, after, sync } = group("versioned");
 
@@ -15,7 +15,7 @@ interface TestData {
   lengthInSeconds: number;
 }
 
-let glitchDB: GlitchUnitemporallyVersionedPartition<TestData>;
+let glitchDB: GlitchUnitemporalPartition<TestData>;
 let tempDirectory: string;
 
 before(async (context) => {
