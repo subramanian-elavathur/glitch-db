@@ -42,7 +42,6 @@ export default class GlitchUniTemporalPartitionImpl<Type>
   extends GlitchPartitionImpl<Type>
   implements GlitchUnitemporalPartition<Type>
 {
-  #versioned: boolean;
   constructor(
     master: GlitchDB,
     localDir: string,
@@ -50,7 +49,6 @@ export default class GlitchUniTemporalPartitionImpl<Type>
     indices?: string[]
   ) {
     super(master, localDir, cacheSize, indices);
-    this.#versioned = true;
   }
 
   #getVersionFromFile(
@@ -74,18 +72,12 @@ export default class GlitchUniTemporalPartitionImpl<Type>
       const fileData = await fs.readFile(keyPath, {
         encoding: "utf8",
       });
-      const parsed = JSON.parse(fileData);
-      if (this.#versioned) {
-        const data = parsed as UnitemporallyVersioned<Type>;
-        const result = this.#getVersionFromFile(data, version);
-        if (!version) {
-          this.cache?.set(resolvedKey, result?.data); // do not set old versions to cache
-        }
-        return Promise.resolve(result?.data);
-      } else {
-        this.cache?.set(resolvedKey, parsed);
-        return Promise.resolve(parsed);
+      const data = JSON.parse(fileData) as UnitemporallyVersioned<Type>;
+      const result = this.#getVersionFromFile(data, version);
+      if (!version) {
+        this.cache?.set(resolvedKey, result?.data); // do not set old versions to cache
       }
+      return Promise.resolve(result?.data);
     } catch (e) {
       // console.log(
       //   `Could not read file at ${keyPath} due to error ${e}. Its likely that this key does not exist.`
@@ -136,38 +128,31 @@ export default class GlitchUniTemporalPartitionImpl<Type>
   ): Promise<boolean> {
     await this.init();
     try {
-      if (this.#versioned) {
-        let data = await this.#getVersionedData(key);
-        if (data) {
-          await this.deleteIndices(this.#getVersionFromFile(data)?.data);
-          data.latestVersion = data.latestVersion + 1;
-        } else {
-          data = {
-            latestVersion: 1,
-            data: {},
-          };
-        }
-        const currentTime = new Date().valueOf();
-        if (data.latestVersion !== 1) {
-          data.data[data.latestVersion - 1] = {
-            ...data.data[data.latestVersion - 1],
-            deletedAt: currentTime,
-          };
-        }
-        data.data[data.latestVersion] = {
-          data: value,
-          createdAt: currentTime,
-          deletedAt: INFINITY_TIME,
-          version: data.latestVersion,
-          metadata,
-        };
-        await fs.writeFile(this.getKeyPath(key), JSON.stringify(data));
+      let data = await this.#getVersionedData(key);
+      if (data) {
+        await this.deleteIndices(this.#getVersionFromFile(data)?.data);
+        data.latestVersion = data.latestVersion + 1;
       } else {
-        if (await this.exists(key)) {
-          await this.deleteIndices(await this.get(key));
-        }
-        await fs.writeFile(this.getKeyPath(key), JSON.stringify(value));
+        data = {
+          latestVersion: 1,
+          data: {},
+        };
       }
+      const currentTime = new Date().valueOf();
+      if (data.latestVersion !== 1) {
+        data.data[data.latestVersion - 1] = {
+          ...data.data[data.latestVersion - 1],
+          deletedAt: currentTime,
+        };
+      }
+      data.data[data.latestVersion] = {
+        data: value,
+        createdAt: currentTime,
+        deletedAt: INFINITY_TIME,
+        version: data.latestVersion,
+        metadata,
+      };
+      await fs.writeFile(this.getKeyPath(key), JSON.stringify(data));
       await this.setIndices(key, value);
       this.cache?.set(key, value);
       return Promise.resolve(true);
