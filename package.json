@@ -1,6 +1,6 @@
 {
   "name": "glitch-db",
-  "version": "0.13.1",
+  "version": "0.14.0",
   "description": "A simple, file based key-value database",
   "main": "./lib/src/index.js",
   "exports": "./lib/src/index.js",
@@ -12,7 +12,7 @@
     "typings/src/*"
   ],
   "engines": {
-    "node": ">=14"
+    "node": ">=16"
   },
   "scripts": {
     "prettier": "prettier --ignore-path .gitignore --write .",

@@ -1,4 +1,4 @@
-import tar = require("tar");
+import * as tar from "tar";
 import { DEFAULT_CACHE_SIZE } from "./constants";
 import GlitchPartitionImpl, { GlitchPartition } from "./GlitchPartition";
 import GlitchUniTemporalPartitionImpl, {

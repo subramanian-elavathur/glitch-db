@@ -147,7 +147,7 @@ test("delete", async (c) => {
 
 after(async (c) => {
   try {
-    await fs.rmdir(tempDirectory, { recursive: true });
+    await fs.rm(tempDirectory, { recursive: true });
     c.log("Deleted temp directory after tests");
   } catch (e) {
     c.log(`Could not delete temp directory at: ${tempDirectory}`);

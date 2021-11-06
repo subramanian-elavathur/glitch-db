@@ -1,6 +1,6 @@
-import LRUCache = require("lru-cache");
-import lget = require("lodash.get");
-import fs = require("fs/promises");
+import * as LRUCache from "lru-cache";
+import * as lget from "lodash.get";
+import * as fs from "fs/promises";
 import { INDEX_FILE } from "./constants";
 import GlitchDB from "./GlitchDB";
 

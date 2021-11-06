@@ -64,7 +64,7 @@ after(async (c) => {
   try {
     const backupPath = multiDB.backup("./");
     console.log(`Backed up data to ${backupPath}`);
-    await fs.rmdir(tempDirectory, { recursive: true });
+    await fs.rm(tempDirectory, { recursive: true });
     c.log("Deleted temp directory after tests");
     await fs.rm(backupPath);
     c.log("Deleted backup");

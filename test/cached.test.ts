@@ -90,8 +90,8 @@ test("check updated cache", async (c) => {
 
 after(async (c) => {
   try {
-    await fs.rmdir(tempDirectoryWithCache, { recursive: true });
-    await fs.rmdir(tempDirectoryNoCache, { recursive: true });
+    await fs.rm(tempDirectoryWithCache, { recursive: true });
+    await fs.rm(tempDirectoryNoCache, { recursive: true });
     c.log("Deleted temp directory after tests");
   } catch (e) {
     c.log(`Could not delete temp directory at: ${tempDirectoryWithCache}`);

@@ -1,4 +1,4 @@
-import fs = require("fs/promises");
+import * as fs from "fs/promises";
 import GlitchDB from ".";
 import { INFINITY_TIME } from "./constants";
 import GlitchPartitionImpl, { GlitchPartition } from "./GlitchPartition";
