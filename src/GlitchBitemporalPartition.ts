@@ -14,17 +14,11 @@ interface BitemporallyVersionedData<Type> extends BitemporalVersion {
 }
 
 interface BitemporallyVersioned<Type> {
-  latestVersion: number;
-  rangeMap: {
-    [validFrom: number]: number; // validFrom to version number map
-  };
-  data: {
-    [key: number]: BitemporallyVersionedData<Type>;
-  };
+  data: BitemporallyVersionedData<Type>[];
 }
 
 export interface GlitchBitemporalPartition<Type> extends GlitchPartition<Type> {
-  get: (key: string, validAsOf?: number, version?: number) => Promise<Type>;
+  get: (key: string, validAsOf?: number) => Promise<Type>;
   set: (
     key: string,
     value: Type,
@@ -34,7 +28,7 @@ export interface GlitchBitemporalPartition<Type> extends GlitchPartition<Type> {
   ) => Promise<boolean>;
   getVersion: (
     key: string,
-    version?: number
+    validAsOf?: number
   ) => Promise<BitemporallyVersionedData<Type>>;
   getAllVersions: (key: string) => Promise<BitemporallyVersionedData<Type>[]>;
 }
@@ -121,6 +115,32 @@ export default class GlitchBiTemporalPartitionImpl<Type>
     const data = await this.#getVersionedData(key);
     return Promise.resolve(data?.data ? Object.values(data.data) : undefined);
   }
+
+  // actions to perform during the set command
+  // if the data does not exist
+  //  create row
+  //  set validFrom to current time, if not specified
+  //  set validTo to infinity time, if specified
+  //  set createdAt to current time
+  //  set deletedAt to infinity
+  //  push row to data array
+  // else if data exists
+  //  map over all data, for each row
+  //    if row.validFrom <= newValidFrom (milestoned to before new row)
+  //      set deleted at to newValidFrom
+  //      push to "before remilestone object"
+  //      continue
+  //    if newValidFrom <= row.validFrom < newValidTo (ranges that start mid new row can require special handling | when newValidTo is not infinity | specify conflict resolution strategy - CLOSE|INTERLEAVE)
+  //      set deleted at to newValidFrom
+  //      if (strategy = INTERLEAVE && newValidTo !== INFINITY && newValidTo < row.validTo)
+  //        push to "after remilestone object"
+  //  if not empty, update validTo = newValidFrom for "before remilestone object"
+  //    push to data array
+  //  create new object for existing data - with validFrom = newValidFrom &&
+  //    push to data array
+  //  if not empty, update validFrom = newValidTo for "after remilestone object"
+  //    push to data array
+  // Indices should not change between versions so just use the inifnit valid row for this
 
   async set(
     key: string,
