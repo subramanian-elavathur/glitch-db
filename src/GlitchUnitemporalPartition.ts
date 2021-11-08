@@ -3,6 +3,16 @@ import GlitchDB from ".";
 import { INFINITY_TIME } from "./constants";
 import GlitchPartitionImpl, { GlitchPartition } from "./GlitchPartition";
 
+//  A case against separate versioned partition
+//  fundamentally versioning and unitemporal milestoning give
+//  the same desired outcome, one represented by version number
+//  the other by two timestamps instead
+//  its harder for consumers to know the version number than to
+//  query for records validAsOf a certain time
+//  therefore TODO: add ability to query by validAsOf to this partition
+//  however something to note is that most often users will not query by
+//  valid as of as they only care about audit history for retention purposes
+
 export interface UnitemporalVersion {
   metadata?: {
     [key: string]: string;
