@@ -46,39 +46,9 @@ export default class GlitchBiTemporalPartitionImpl<Type>
     super(master, localDir, cacheSize, indices);
   }
 
-  #getVersionFromFile(
-    file: BitemporallyVersioned<Type>,
-    version?: number
-  ): BitemporallyVersionedData<Type> {
-    return file?.data[version ?? file?.latestVersion];
-  }
-
-  async get(key: string, validAsOf?: number, version?: number): Promise<Type> {
+  async get(key: string, validAsOf?: number): Promise<Type> {
     await this.init();
-    const resolvedKey = this.resolveKey(key);
-    if (!version) {
-      const cachedData = this.cache?.get(resolvedKey);
-      if (cachedData) {
-        return Promise.resolve(cachedData);
-      }
-    }
-    const keyPath = this.getKeyPath(resolvedKey);
-    try {
-      const fileData = await fs.readFile(keyPath, {
-        encoding: "utf8",
-      });
-      const data = JSON.parse(fileData) as BitemporallyVersioned<Type>;
-      const result = this.#getVersionFromFile(data, version);
-      if (!version) {
-        this.cache?.set(resolvedKey, result?.data); // do not set old versions to cache
-      }
-      return Promise.resolve(result?.data);
-    } catch (e) {
-      // console.log(
-      //   `Could not read file at ${keyPath} due to error ${e}. Its likely that this key does not exist.`
-      // );
-      return Promise.resolve(undefined);
-    }
+    return Promise.resolve(undefined);
   }
 
   async #getVersionedData(key: string): Promise<BitemporallyVersioned<Type>> {
@@ -100,12 +70,10 @@ export default class GlitchBiTemporalPartitionImpl<Type>
 
   async getVersion(
     key: string,
-    version?: number
+    validAsOf?: number
   ): Promise<BitemporallyVersionedData<Type>> {
     await this.init();
-    return Promise.resolve(
-      this.#getVersionFromFile(await this.#getVersionedData(key), version)
-    );
+    return Promise.resolve(undefined);
   }
 
   async getAllVersions(
@@ -113,35 +81,10 @@ export default class GlitchBiTemporalPartitionImpl<Type>
   ): Promise<BitemporallyVersionedData<Type>[]> {
     await this.init();
     const data = await this.#getVersionedData(key);
-    return Promise.resolve(data?.data ? Object.values(data.data) : undefined);
+    return Promise.resolve(data?.data);
   }
 
-  // actions to perform during the set command
-  // if the data does not exist
-  //  create row
-  //  set validFrom to current time, if not specified
-  //  set validTo to infinity time, if specified
-  //  set createdAt to current time
-  //  set deletedAt to infinity
-  //  push row to data array
-  // else if data exists
-  //  map over all data, for each row
-  //    if row.validFrom <= newValidFrom (milestoned to before new row)
-  //      set deleted at to newValidFrom
-  //      push to "before remilestone object"
-  //      continue
-  //    if newValidFrom <= row.validFrom < newValidTo (ranges that start mid new row can require special handling | when newValidTo is not infinity | specify conflict resolution strategy - CLOSE|INTERLEAVE)
-  //      set deleted at to newValidFrom
-  //      if (strategy = INTERLEAVE && newValidTo !== INFINITY && newValidTo < row.validTo)
-  //        push to "after remilestone object"
-  //  if not empty, update validTo = newValidFrom for "before remilestone object"
-  //    push to data array
-  //  create new object for existing data - with validFrom = newValidFrom &&
-  //    push to data array
-  //  if not empty, update validFrom = newValidTo for "after remilestone object"
-  //    push to data array
-  // Indices should not change between versions so just use the inifnit valid row for this
-
+  // todo caching
   async set(
     key: string,
     value: Type,
@@ -152,35 +95,62 @@ export default class GlitchBiTemporalPartitionImpl<Type>
     await this.init();
     try {
       let data = await this.#getVersionedData(key);
-      if (data) {
-        await this.deleteIndices(this.#getVersionFromFile(data)?.data);
-        data.latestVersion = data.latestVersion + 1;
-      } else {
-        data = {
-          latestVersion: 1,
-          rangeMap: {},
-          data: {},
-        };
-      }
       const currentTime = new Date().valueOf();
-      if (data.latestVersion !== 1) {
-        data.data[data.latestVersion - 1] = {
-          ...data.data[data.latestVersion - 1],
-          deletedAt: currentTime,
-        };
+      const newValidFrom = validFrom ?? currentTime;
+      const newValidTo = validTo ?? INFINITY_TIME;
+
+      if (newValidTo !== INFINITY_TIME && newValidTo <= newValidFrom) {
+        throw new Error("Valid To cannot be less than or equal to Valid From");
       }
-      data.data[data.latestVersion] = {
-        data: value,
-        createdAt: currentTime,
-        deletedAt: INFINITY_TIME,
-        validFrom: 0,
-        validTo: INFINITY_TIME,
-        version: data.latestVersion,
-        metadata,
-      };
-      await fs.writeFile(this.getKeyPath(key), JSON.stringify(data));
-      await this.setIndices(key, value);
-      this.cache?.set(key, value);
+
+      if (!data?.data?.length) {
+        data = {
+          data: [
+            {
+              data: value,
+              createdAt: currentTime,
+              deletedAt: INFINITY_TIME,
+              validFrom: newValidFrom,
+              validTo: newValidTo,
+              metadata,
+            },
+          ],
+        };
+        await fs.writeFile(this.getKeyPath(key), JSON.stringify(data));
+        await this.setIndices(key, value);
+      } else {
+        let rowValidBeforeCurrentRow: BitemporallyVersionedData<Type>;
+        data.data = data.data.map((row) => {
+          const updatedRow = { ...row };
+          if (row.validFrom <= newValidFrom && row.validTo > newValidFrom) {
+            updatedRow.deletedAt = currentTime;
+            rowValidBeforeCurrentRow = row;
+          } else if (newValidFrom <= row.validFrom) {
+            updatedRow.deletedAt = currentTime;
+          }
+          return updatedRow;
+        });
+
+        if (rowValidBeforeCurrentRow) {
+          data.data.push({
+            ...rowValidBeforeCurrentRow,
+            validTo: newValidFrom,
+          });
+        }
+
+        data.data.push({
+          data: value,
+          createdAt: currentTime,
+          deletedAt: INFINITY_TIME,
+          validFrom: newValidFrom,
+          validTo: newValidTo,
+          metadata,
+        });
+
+        await fs.writeFile(this.getKeyPath(key), JSON.stringify(data));
+        await this.deleteIndices(await this.get(key));
+        await this.setIndices(key, value);
+      }
       return Promise.resolve(true);
     } catch (error) {
       console.log(`Error setting value for key: ${key}, due to error ${error}`);

@@ -17,7 +17,7 @@ export interface UnitemporalVersion {
   metadata?: {
     [key: string]: string;
   };
-  version: number;
+  version?: number;
   createdAt: number;
   deletedAt: number;
 }
