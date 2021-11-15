@@ -113,7 +113,7 @@ test("get version with audit", async (c) => {
     deletedAt: undefined,
   });
   const delicate = await glitchDB.getVersion("delicate");
-  c.check(-1, delicate.deletedAt);
+  c.check(999999999999999, delicate.deletedAt);
   c.check(true, delicate.createdAt > 1);
   await c.snapshot("get delicate version 1", {
     ...delicate,

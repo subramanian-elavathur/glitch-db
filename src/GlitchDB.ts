@@ -4,6 +4,9 @@ import GlitchPartitionImpl, { GlitchPartition } from "./GlitchPartition";
 import GlitchUniTemporalPartitionImpl, {
   GlitchUnitemporalPartition,
 } from "./GlitchUnitemporalPartition";
+import GlitchBiTemporalPartitionImpl, {
+  GlitchBitemporalPartition,
+} from "./GlitchBitemporalPartition";
 
 export default class GlitchDB {
   #baseDir: string;
@@ -77,6 +80,25 @@ export default class GlitchDB {
       versioned: true,
     };
     return new GlitchUniTemporalPartitionImpl<Type>(
+      this,
+      `${this.#baseDir}/${name}`,
+      cacheSizeWithDefault,
+      indices
+    );
+  }
+
+  getBitemporalPartition<Type>(
+    name: string,
+    indices?: string[],
+    cacheSize?: number
+  ): GlitchBitemporalPartition<Type> {
+    const cacheSizeWithDefault = cacheSize ?? this.#defaultCacheSize;
+    this.#partitions[name] = {
+      name,
+      cache: cacheSizeWithDefault,
+      versioned: true,
+    };
+    return new GlitchBiTemporalPartitionImpl<Type>(
       this,
       `${this.#baseDir}/${name}`,
       cacheSizeWithDefault,

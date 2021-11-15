@@ -47,7 +47,10 @@ export default class GlitchBiTemporalPartitionImpl<Type>
   }
 
   async get(key: string, validAsOf?: number): Promise<Type> {
-    await this.init();
+    const data = await this.getVersion(key, validAsOf);
+    if (data) {
+      return Promise.resolve(data.data);
+    }
     return Promise.resolve(undefined);
   }
 
@@ -73,7 +76,24 @@ export default class GlitchBiTemporalPartitionImpl<Type>
     validAsOf?: number
   ): Promise<BitemporallyVersionedData<Type>> {
     await this.init();
-    return Promise.resolve(undefined);
+    const fileData = await this.#getVersionedData(key);
+    const validFrom = validAsOf ?? INFINITY_TIME;
+    if (fileData) {
+      const required = fileData.data.filter((each) => {
+        return (
+          each.deletedAt === INFINITY_TIME &&
+          each.validTo < validFrom &&
+          validFrom <= each.validFrom
+        );
+      });
+      if (required?.length) {
+        return Promise.resolve(required[0]);
+      } else {
+        return Promise.resolve(undefined);
+      }
+    } else {
+      return Promise.resolve(undefined);
+    }
   }
 
   async getAllVersions(
