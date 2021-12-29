@@ -1,0 +1,13 @@
+{
+  "data": {
+    "song": "Gravity2",
+    "artist": "John Mayer",
+    "year": 2004,
+    "genre": ["Rockz", "Bluesz"],
+    "lengthInSeconds": 247
+  },
+  "createdAt": 1640769776468,
+  "deletedAt": 999999999999999,
+  "validFrom": 1640769776468,
+  "validTo": 999999999999999
+}

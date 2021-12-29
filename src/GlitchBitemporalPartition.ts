@@ -17,6 +17,7 @@ interface BitemporallyVersioned<Type> {
   data: BitemporallyVersionedData<Type>[];
 }
 
+// todo caching
 export interface GlitchBitemporalPartition<Type> extends GlitchPartition<Type> {
   get: (key: string, validAsOf?: number) => Promise<Type>;
   set: (
@@ -48,10 +49,7 @@ export default class GlitchBiTemporalPartitionImpl<Type>
 
   async get(key: string, validAsOf?: number): Promise<Type> {
     const data = await this.getVersion(key, validAsOf);
-    if (data) {
-      return Promise.resolve(data.data);
-    }
-    return Promise.resolve(undefined);
+    return data ? Promise.resolve(data.data) : Promise.resolve(undefined);
   }
 
   async #getVersionedData(key: string): Promise<BitemporallyVersioned<Type>> {
@@ -82,12 +80,12 @@ export default class GlitchBiTemporalPartitionImpl<Type>
       const required = fileData.data.filter((each) => {
         return (
           each.deletedAt === INFINITY_TIME &&
-          each.validTo < validFrom &&
-          validFrom <= each.validFrom
+          each.validFrom < validFrom &&
+          validFrom <= each.validTo
         );
       });
       if (required?.length) {
-        return Promise.resolve(required[0]);
+        return Promise.resolve(required[0]); // returns only the first element as more than one elements are not allowed
       } else {
         return Promise.resolve(undefined);
       }

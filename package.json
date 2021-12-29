@@ -1,6 +1,6 @@
 {
   "name": "glitch-db",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "A simple, file based key-value database",
   "main": "./lib/src/index.js",
   "exports": "./lib/src/index.js",

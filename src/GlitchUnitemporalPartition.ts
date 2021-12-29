@@ -80,6 +80,7 @@ export default class GlitchUniTemporalPartitionImpl<Type>
     const keyPath = this.getKeyPath(resolvedKey);
     try {
       const fileData = await fs.readFile(keyPath, {
+        // todo use get versioned data
         encoding: "utf8",
       });
       const data = JSON.parse(fileData) as UnitemporallyVersioned<Type>;
