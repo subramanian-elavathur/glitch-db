@@ -1,0 +1,24 @@
+[
+  {
+    "data": {
+      "song": "Ocean",
+      "artist": "John Butler",
+      "year": 2012,
+      "genre": ["Classical"],
+      "lengthInSeconds": 724
+    },
+    "validFrom": 6893,
+    "validTo": 999999999999999
+  },
+  {
+    "data": {
+      "song": "Titanic",
+      "artist": "John Butler",
+      "year": 2001,
+      "genre": ["Rock"],
+      "lengthInSeconds": 500
+    },
+    "validFrom": 1,
+    "validTo": 500
+  }
+]

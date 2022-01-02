@@ -3,8 +3,25 @@ import * as path from "path";
 import * as os from "os";
 import { group } from "good-vibes";
 import GlitchDB, { GlitchBitemporalPartition } from "../src";
+import { BitemporallyVersionedData } from "./GlitchBitemporalPartition";
 
 const { before, test, after, sync } = group("bitemporal");
+
+const removeCDTimestampsRaw = (data: BitemporallyVersionedData<unknown>) => ({
+  ...data,
+  createdAt: undefined,
+  deletedAt: undefined,
+});
+
+const removeCDTimestamps = (
+  data:
+    | BitemporallyVersionedData<unknown>
+    | BitemporallyVersionedData<unknown>[]
+) => {
+  return Array.isArray(data)
+    ? data.map(removeCDTimestampsRaw)
+    : removeCDTimestampsRaw(data);
+};
 
 interface TestData {
   song: string;
@@ -17,6 +34,7 @@ interface TestData {
 let glitchDB: GlitchBitemporalPartition<TestData>;
 let tempDirectory: string;
 let timeAtFirstInsert: number;
+const FIXED_TIMESTAMP = 6893;
 
 before(async (context) => {
   tempDirectory = path.join(os.tmpdir(), "glitch-bitemporal");
@@ -33,6 +51,17 @@ before(async (context) => {
     genre: ["Rock", "Blues"],
     lengthInSeconds: 247,
   });
+  await glitchDB.set(
+    "ocean",
+    {
+      song: "Ocean",
+      artist: "John Butler",
+      year: 2012,
+      genre: ["Classical"],
+      lengthInSeconds: 724,
+    },
+    FIXED_TIMESTAMP
+  );
   timeAtFirstInsert = new Date().valueOf();
   setTimeout(async () => {
     context.log("Setting second value");
@@ -61,9 +90,54 @@ test("get", async (c) => {
   );
   const resultBeforeFirstInsertion = await glitchDB.get(
     "gravity",
-    timeAtFirstInsert - 10
+    timeAtFirstInsert - 500 // less flaky this way
   );
   c.check(undefined, resultBeforeFirstInsertion);
+  c.done();
+});
+
+test("getVersion", async (c) => {
+  await c.snapshot(
+    "get latest version",
+    removeCDTimestamps(await glitchDB.getVersion("ocean"))
+  );
+  await c.snapshot(
+    "get latest version by key",
+    removeCDTimestamps(await glitchDB.getVersion("John Butler"))
+  );
+  const resultBeforeFirstInsertion = await glitchDB.get(
+    "ocean",
+    FIXED_TIMESTAMP - 500
+  );
+  c.check(undefined, resultBeforeFirstInsertion);
+  c.done();
+});
+
+test("set", async (c) => {
+  await glitchDB.set(
+    "ocean",
+    {
+      song: "Titanic",
+      artist: "John Butler",
+      year: 2001,
+      genre: ["Rock"],
+      lengthInSeconds: 500,
+    },
+    1,
+    500
+  );
+  await c.snapshot("get latest version", await glitchDB.get("ocean"));
+  await c.snapshot("get older version", await glitchDB.get("ocean", 250));
+  c.check(undefined, await glitchDB.get("ocean", 0));
+  c.check(undefined, await glitchDB.get("ocean", 2000));
+  c.done();
+});
+
+test("getAllVersions", async (c) => {
+  await c.snapshot(
+    "get all versions",
+    removeCDTimestamps(await glitchDB.getAllVersions("ocean"))
+  );
   c.done();
 });
 

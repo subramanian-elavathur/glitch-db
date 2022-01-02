@@ -1,13 +1,11 @@
 {
   "data": {
-    "song": "Gravity2",
-    "artist": "John Mayer",
-    "year": 2004,
-    "genre": ["Rockz", "Bluesz"],
-    "lengthInSeconds": 247
+    "song": "Ocean",
+    "artist": "John Butler",
+    "year": 2012,
+    "genre": ["Classical"],
+    "lengthInSeconds": 724
   },
-  "createdAt": 1640769776468,
-  "deletedAt": 999999999999999,
-  "validFrom": 1640769776468,
+  "validFrom": 6893,
   "validTo": 999999999999999
 }

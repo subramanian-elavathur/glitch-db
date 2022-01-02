@@ -9,7 +9,7 @@ interface BitemporalVersion extends UnitemporalVersion {
   validTo: number;
 }
 
-interface BitemporallyVersionedData<Type> extends BitemporalVersion {
+export interface BitemporallyVersionedData<Type> extends BitemporalVersion {
   data: Type;
 }
 
@@ -140,10 +140,17 @@ export default class GlitchBiTemporalPartitionImpl<Type>
         let rowValidBeforeCurrentRow: BitemporallyVersionedData<Type>;
         data.data = data.data.map((row) => {
           const updatedRow = { ...row };
+          // todo - this logic has 3 buckets
+          // inside span of existing row
+          // leading edge conflict with existing row
+          // trailing edge conflict with existing row
           if (row.validFrom <= newValidFrom && row.validTo > newValidFrom) {
             updatedRow.deletedAt = currentTime;
             rowValidBeforeCurrentRow = row;
-          } else if (newValidFrom <= row.validFrom) {
+          } else if (
+            newValidFrom <= row.validFrom &&
+            newValidTo > row.validFrom
+          ) {
             updatedRow.deletedAt = currentTime;
           }
           return updatedRow;
