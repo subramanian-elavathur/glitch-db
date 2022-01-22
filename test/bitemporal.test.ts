@@ -4,13 +4,14 @@ import * as os from "os";
 import { group } from "good-vibes";
 import GlitchDB, { GlitchBitemporalPartition } from "../src";
 import { BitemporallyVersionedData } from "./GlitchBitemporalPartition";
+import { INFINITY_TIME } from "../src/constants";
 
 const { before, test, after, sync } = group("bitemporal");
 
 const removeCDTimestampsRaw = (data: BitemporallyVersionedData<unknown>) => ({
   ...data,
   createdAt: undefined,
-  deletedAt: undefined,
+  deletedAt: data.deletedAt === INFINITY_TIME ? INFINITY_TIME : -1,
 });
 
 const removeCDTimestamps = (
@@ -76,7 +77,7 @@ before(async (context) => {
   }, 2000);
 });
 
-sync(); // run tests one after the other
+sync();
 
 test("get", async (c) => {
   await c.snapshot("get latest version", await glitchDB.get("gravity"));
@@ -90,9 +91,10 @@ test("get", async (c) => {
   );
   const resultBeforeFirstInsertion = await glitchDB.get(
     "gravity",
-    timeAtFirstInsert - 500 // less flaky this way
+    timeAtFirstInsert - 1000 // less flaky this way
   );
   c.check(undefined, resultBeforeFirstInsertion);
+  c.check(undefined, await glitchDB.get("invalid"));
   c.done();
 });
 
@@ -130,14 +132,57 @@ test("set", async (c) => {
   await c.snapshot("get older version", await glitchDB.get("ocean", 250));
   c.check(undefined, await glitchDB.get("ocean", 0));
   c.check(undefined, await glitchDB.get("ocean", 2000));
+  try {
+    await glitchDB.set(
+      "ocean",
+      {
+        song: "Titanic",
+        artist: "John Butler",
+        year: 2001,
+        genre: ["Rock"],
+        lengthInSeconds: 500,
+      },
+      50,
+      25
+    );
+  } catch (error) {
+    c.check(
+      "Valid To cannot be less than or equal to Valid From",
+      error.message
+    );
+  }
   c.done();
 });
 
 test("getAllVersions", async (c) => {
+  await glitchDB.set(
+    "ocean",
+    {
+      song: "Highway to hell",
+      artist: "John Butler",
+      year: 2001,
+      genre: ["Rock"],
+      lengthInSeconds: 500,
+    },
+    500,
+    7895
+  );
+  await glitchDB.set(
+    "ocean",
+    {
+      song: "You shook me all night long",
+      artist: "John Butler",
+      year: 2001,
+      genre: ["Rock"],
+      lengthInSeconds: 500,
+    },
+    7895
+  );
   await c.snapshot(
     "get all versions",
     removeCDTimestamps(await glitchDB.getAllVersions("ocean"))
   );
+  await c.snapshot("get 7895 version", await glitchDB.get("ocean", 7895));
   c.done();
 });
 

@@ -6,6 +6,7 @@
     "genre": ["Classical"],
     "lengthInSeconds": 724
   },
+  "deletedAt": 999999999999999,
   "validFrom": 6893,
   "validTo": 999999999999999
 }

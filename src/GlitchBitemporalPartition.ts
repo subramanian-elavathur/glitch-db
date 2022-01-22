@@ -80,8 +80,9 @@ export default class GlitchBiTemporalPartitionImpl<Type>
       const required = fileData.data.filter((each) => {
         return (
           each.deletedAt === INFINITY_TIME &&
-          each.validFrom < validFrom &&
-          validFrom <= each.validTo
+          each.validFrom <= validFrom &&
+          ((validFrom === INFINITY_TIME && each.validTo === INFINITY_TIME) ||
+            validFrom < each.validTo)
         );
       });
       if (required?.length) {
