@@ -45,7 +45,7 @@
   },
   "homepage": "https://github.com/subramanian-elavathur/glitch-db#readme",
   "devDependencies": {
-    "@types/lru-cache": "^5.1.1",
+    "@types/lru-cache": "^7.10.10",
     "@types/node": "^17.0.0",
     "@types/tar": "^6.1.0",
     "@typescript-eslint/eslint-plugin": "^5.3.0",
@@ -62,7 +62,7 @@
   },
   "dependencies": {
     "lodash.get": "^4.4.2",
-    "lru-cache": "^6.0.0",
+    "lru-cache": "^7.10.1",
     "tar": "^6.1.11"
   }
 }
