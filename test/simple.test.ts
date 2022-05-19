@@ -49,10 +49,6 @@ test("keys api", async (c) => {
   c.check(["key-1", "key-2"], await glitchDB.keys()).done();
 });
 
-test("keys api with additional keys", async (c) => {
-  c.check(["key-1", "key-2"], await glitchDB.keys()).done();
-});
-
 test("data api", async (c) => {
   c.check(
     { "key-1": "value-4", "key-2": "value-2" },
