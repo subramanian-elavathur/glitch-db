@@ -46,7 +46,7 @@
   "homepage": "https://github.com/subramanian-elavathur/glitch-db#readme",
   "devDependencies": {
     "@types/lru-cache": "^5.1.1",
-    "@types/node": "^17.0.0",
+    "@types/node": "^18.0.3",
     "@types/tar": "^6.1.0",
     "@typescript-eslint/eslint-plugin": "^5.3.0",
     "@typescript-eslint/parser": "^5.3.0",
