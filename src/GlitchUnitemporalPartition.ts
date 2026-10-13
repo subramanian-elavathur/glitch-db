@@ -1,7 +1,7 @@
-import * as fs from "fs/promises";
-import GlitchDB from ".";
-import { INFINITY_TIME } from "./constants";
-import GlitchPartitionImpl, { GlitchPartition } from "./GlitchPartition";
+import { INFINITY_TIME } from "./constants.ts";
+import GlitchPartitionImpl, {
+  type GlitchPartition,
+} from "./GlitchPartition.ts";
 
 //  A case against separate versioned partition
 //  fundamentally versioning and unitemporal milestoning give
@@ -14,162 +14,130 @@ import GlitchPartitionImpl, { GlitchPartition } from "./GlitchPartition";
 //  valid as of as they only care about audit history for retention purposes
 
 export interface UnitemporalVersion {
-  metadata?: {
-    [key: string]: string;
-  };
+  metadata?: Record<string, string>;
   version?: number;
   createdAt: number;
   deletedAt: number;
 }
 
-interface UnitemporallyVersionedData<Type> extends UnitemporalVersion {
+export interface UnitemporallyVersionedData<Type> extends UnitemporalVersion {
   data: Type;
 }
 
 interface UnitemporallyVersioned<Type> {
   latestVersion: number;
-  data: {
-    [key: number]: UnitemporallyVersionedData<Type>;
-  };
+  data: Record<number, UnitemporallyVersionedData<Type>>;
 }
 
-export interface GlitchUnitemporalPartition<Type>
-  extends GlitchPartition<Type> {
-  get: (key: string, version?: number) => Promise<Type>;
+export interface GlitchUnitemporalPartition<
+  Type,
+> extends GlitchPartition<Type> {
+  get: (key: string, version?: number) => Promise<Type | undefined>;
   set: (
     key: string,
     value: Type,
-    metadata?: { [key: string]: string }
+    metadata?: Record<string, string>,
   ) => Promise<boolean>;
   getVersion: (
     key: string,
-    version?: number
-  ) => Promise<UnitemporallyVersionedData<Type>>;
-  getAllVersions: (key: string) => Promise<UnitemporallyVersionedData<Type>[]>;
+    version?: number,
+  ) => Promise<UnitemporallyVersionedData<Type> | undefined>;
+  getAllVersions: (
+    key: string,
+  ) => Promise<UnitemporallyVersionedData<Type>[] | undefined>;
 }
 
-export default class GlitchUniTemporalPartitionImpl<Type>
+const getVersionFromFile = <Type>(
+  file: UnitemporallyVersioned<Type> | undefined,
+  version?: number,
+): UnitemporallyVersionedData<Type> | undefined =>
+  file?.data[version ?? file.latestVersion];
+
+export default class GlitchUnitemporalPartitionImpl<Type>
   extends GlitchPartitionImpl<Type>
   implements GlitchUnitemporalPartition<Type>
 {
-  constructor(
-    master: GlitchDB,
-    localDir: string,
-    cacheSize?: number,
-    indices?: string[]
-  ) {
-    super(master, localDir, cacheSize, indices);
+  #getVersionedData(
+    key: string,
+  ): Promise<UnitemporallyVersioned<Type> | undefined> {
+    return this.readJson<UnitemporallyVersioned<Type>>(key);
   }
 
-  #getVersionFromFile(
-    file: UnitemporallyVersioned<Type>,
-    version?: number
-  ): UnitemporallyVersionedData<Type> {
-    return file?.data[version ?? file?.latestVersion];
+  protected override async getLatest(key: string): Promise<Type | undefined> {
+    const cached = this.getCached(key);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const latest = getVersionFromFile(await this.#getVersionedData(key))?.data;
+    if (latest !== undefined) {
+      this.setCached(key, latest); // only the latest version is ever cached
+    }
+    return latest;
   }
 
-  async get(key: string, version?: number): Promise<Type> {
-    await this.init();
-    const resolvedKey = this.resolveKey(key);
-    if (!version) {
-      const cachedData = this.cache?.get(resolvedKey);
-      if (cachedData) {
-        return Promise.resolve(cachedData);
-      }
+  override async get(key: string, version?: number): Promise<Type | undefined> {
+    if (version === undefined) {
+      return super.get(key);
     }
-    const keyPath = this.getKeyPath(resolvedKey);
-    try {
-      const fileData = await fs.readFile(keyPath, {
-        // todo use get versioned data
-        encoding: "utf8",
-      });
-      const data = JSON.parse(fileData) as UnitemporallyVersioned<Type>;
-      const result = this.#getVersionFromFile(data, version);
-      if (!version) {
-        this.cache?.set(resolvedKey, result?.data); // do not set old versions to cache
-      }
-      return Promise.resolve(result?.data);
-    } catch (e) {
-      // console.log(
-      //   `Could not read file at ${keyPath} due to error ${e}. Its likely that this key does not exist.`
-      // );
-      return Promise.resolve(undefined);
-    }
-  }
-
-  async #getVersionedData(key: string): Promise<UnitemporallyVersioned<Type>> {
-    const resolvedKey = this.resolveKey(key);
-    const keyPath = this.getKeyPath(resolvedKey);
-    try {
-      const fileData = await fs.readFile(keyPath, {
-        encoding: "utf8",
-      });
-      const parsed = JSON.parse(fileData) as UnitemporallyVersioned<Type>;
-      return Promise.resolve(parsed);
-    } catch (e) {
-      // console.log(
-      //   `Could not read file at ${keyPath} due to error ${e}. Its likely that this key does not exist.`
-      // );
-      return Promise.resolve(undefined);
-    }
+    return (await this.getVersion(key, version))?.data;
   }
 
   async getVersion(
     key: string,
-    version?: number
-  ): Promise<UnitemporallyVersionedData<Type>> {
+    version?: number,
+  ): Promise<UnitemporallyVersionedData<Type> | undefined> {
     await this.init();
-    return Promise.resolve(
-      this.#getVersionFromFile(await this.#getVersionedData(key), version)
+    return getVersionFromFile(
+      await this.#getVersionedData(this.resolveKey(key)),
+      version,
     );
   }
 
   async getAllVersions(
-    key: string
-  ): Promise<UnitemporallyVersionedData<Type>[]> {
+    key: string,
+  ): Promise<UnitemporallyVersionedData<Type>[] | undefined> {
     await this.init();
-    const data = await this.#getVersionedData(key);
-    return Promise.resolve(data?.data ? Object.values(data.data) : undefined);
+    const file = await this.#getVersionedData(this.resolveKey(key));
+    return file && Object.values(file.data);
   }
 
-  async set(
+  override async set(
     key: string,
     value: Type,
-    metadata?: { [key: string]: string }
+    metadata?: Record<string, string>,
   ): Promise<boolean> {
     await this.init();
     try {
-      let data = await this.#getVersionedData(key);
-      if (data) {
-        await this.deleteIndices(this.#getVersionFromFile(data)?.data);
-        data.latestVersion = data.latestVersion + 1;
-      } else {
-        data = {
-          latestVersion: 1,
-          data: {},
-        };
+      const file = (await this.#getVersionedData(key)) ?? {
+        latestVersion: 0,
+        data: {},
+      };
+      const previous = getVersionFromFile(file);
+      const currentTime = Date.now();
+      if (previous) {
+        previous.deletedAt = currentTime;
       }
-      const currentTime = new Date().valueOf();
-      if (data.latestVersion !== 1) {
-        data.data[data.latestVersion - 1] = {
-          ...data.data[data.latestVersion - 1],
-          deletedAt: currentTime,
-        };
-      }
-      data.data[data.latestVersion] = {
+      const version = file.latestVersion + 1;
+      file.latestVersion = version;
+      file.data[version] = {
         data: value,
         createdAt: currentTime,
         deletedAt: INFINITY_TIME,
-        version: data.latestVersion,
+        version,
         metadata,
       };
-      await fs.writeFile(this.getKeyPath(key), JSON.stringify(data));
+      await this.writeJson(key, file);
+      if (previous) {
+        await this.deleteIndices(key, previous.data);
+      }
       await this.setIndices(key, value);
-      this.cache?.set(key, value);
-      return Promise.resolve(true);
+      this.setCached(key, value);
+      return true;
     } catch (error) {
-      console.log(`Error setting value for key: ${key}, due to error ${error}`);
-      return Promise.resolve(false);
+      console.error(
+        `Error setting value for key: ${key}, due to error ${String(error)}`,
+      );
+      return false;
     }
   }
 }

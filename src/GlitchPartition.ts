@@ -1,10 +1,41 @@
-import * as LRUCache from "lru-cache";
-import * as lget from "lodash.get";
-import * as fs from "fs/promises";
-import { INDEX_FILE } from "./constants";
-import GlitchDB from "./GlitchDB";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import { LRUCache } from "lru-cache";
+import { INDEX_FILE } from "./constants.ts";
+import type GlitchDB from "./GlitchDB.ts";
 
-const getIndexFilePath = (dir: string) => `${dir}/${INDEX_FILE}`;
+const KEY_FILE_EXTENSION = ".json";
+const INDEX_KEY = INDEX_FILE.slice(0, -KEY_FILE_EXTENSION.length);
+const INVALID_KEY_CHARACTERS = /[/\\\0]/;
+
+/**
+ * Reads a value at a dot separated path such as `address.city` or `tags[0]`,
+ * returning `undefined` when any part of the path is missing.
+ */
+const getByPath = (value: unknown, propertyPath: string): unknown =>
+  propertyPath
+    .replace(/\[(\w+)\]/g, ".$1")
+    .split(".")
+    .filter((segment) => segment.length > 0)
+    .reduce<unknown>(
+      (current, segment) =>
+        current === null || current === undefined
+          ? undefined
+          : (current as Record<string, unknown>)[segment],
+      value,
+    );
+
+/**
+ * Converts primitive values to the string keys used by indices and joins.
+ * Objects, arrays, `null` and `undefined` cannot be used as keys.
+ */
+const toKey = (value: unknown): string | undefined =>
+  typeof value === "string" ||
+  typeof value === "number" ||
+  typeof value === "boolean" ||
+  typeof value === "bigint"
+    ? String(value)
+    : undefined;
 
 interface Joiner {
   db: string;
@@ -14,246 +45,275 @@ interface Joiner {
 }
 
 export interface GlitchPartition<Type> {
-  exists: (key: string, version?: number) => Promise<boolean>;
-  get: (key: string) => Promise<Type>;
+  exists: (key: string) => Promise<boolean>;
+  get: (key: string) => Promise<Type | undefined>;
   keys: () => Promise<string[]>;
-  data: () => Promise<{ [key: string]: Type }>;
+  data: () => Promise<Record<string, Type>>;
   set: (key: string, value: Type) => Promise<boolean>;
   delete: (key: string) => Promise<boolean>;
   createJoin: (
     db: string,
     joinName: string,
     leftKey: string,
-    rightKey?: string
+    rightKey?: string,
   ) => void;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  getWithJoins: (key: string) => Promise<any>;
+  getWithJoins: <Joined = Record<string, unknown>>(
+    key: string,
+  ) => Promise<Joined | undefined>;
 }
 
-export default class GlitchPartitionImpl<Type>
-  implements GlitchPartition<Type>
-{
-  #localDir: string;
-  #initComplete: boolean;
-  #indices: string[];
-  #indexMap: {
-    [key: string]: string;
-  };
-  #joins: {
-    [joinName: string]: Joiner;
-  };
-  protected cache: LRUCache<string, Type>; // cache always maintains the latest data
-  #master: GlitchDB;
+export default class GlitchPartitionImpl<
+  Type,
+> implements GlitchPartition<Type> {
+  readonly #master: GlitchDB;
+  readonly #localDir: string;
+  readonly #indices: string[];
+  readonly #joins = new Map<string, Joiner>();
+  // the cache always holds the latest value of a key, serialized so that callers never share mutable objects with it
+  readonly #cache?: LRUCache<string, string>;
+  #indexMap = new Map<string, string>();
+  #initialized?: Promise<void>;
+  #indexWrites = Promise.resolve();
 
   constructor(
     master: GlitchDB,
     localDir: string,
     cacheSize?: number,
-    indices?: string[]
+    indices?: string[],
   ) {
     this.#master = master;
     this.#localDir = localDir;
-    this.#joins = {};
-    if (cacheSize > 0) {
-      this.cache = new LRUCache(cacheSize);
+    this.#indices = indices ?? [];
+    if (cacheSize && cacheSize > 0) {
+      this.#cache = new LRUCache({ max: cacheSize });
     }
-    this.#indices = indices;
-    this.#indexMap = {};
   }
 
-  async #loadIndex(): Promise<boolean> {
+  get #indexFilePath(): string {
+    return path.join(this.#localDir, INDEX_FILE);
+  }
+
+  async #loadIndex(): Promise<void> {
     try {
-      const stat = await fs.stat(getIndexFilePath(this.#localDir));
-      if (stat.isFile()) {
-        const fileData = await fs.readFile(getIndexFilePath(this.#localDir), {
-          encoding: "utf8",
-        });
-        this.#indexMap = JSON.parse(fileData);
-        return Promise.resolve(true);
-      } else {
-        throw new Error(
-          `Index path is not a file! Something is very wrong here, please inspect this path: ${getIndexFilePath(
-            this.#localDir
-          )}`
-        );
-      }
-    } catch (e) {
-      // console.log(`Failed to load index file with error ${e}`);
-      return Promise.resolve(false);
+      const fileData = await fs.readFile(this.#indexFilePath, "utf8");
+      this.#indexMap = new Map(
+        Object.entries(JSON.parse(fileData) as Record<string, string>),
+      );
+    } catch {
+      // no index has been written for this partition yet
     }
   }
 
-  async #flushIndex(): Promise<boolean> {
+  async #writeIndex(): Promise<void> {
     try {
       await fs.writeFile(
-        getIndexFilePath(this.#localDir),
-        JSON.stringify(this.#indexMap)
+        this.#indexFilePath,
+        JSON.stringify(Object.fromEntries(this.#indexMap)),
       );
-      return Promise.resolve(true);
-    } catch (e) {
-      console.log(`Failed to write index file with error ${e}`);
-      return Promise.resolve(false);
+    } catch (error) {
+      console.error(`Failed to write index file with error ${String(error)}`);
     }
   }
 
-  protected async init() {
-    if (this.#initComplete) {
-      return; // no need to re-init
-    }
+  #flushIndex(): Promise<void> {
+    // writes are queued as overlapping writes to the same file can interleave and corrupt it
+    this.#indexWrites = this.#indexWrites.then(() => this.#writeIndex());
+    return this.#indexWrites;
+  }
+
+  async #initialize(): Promise<void> {
     let stat;
     try {
       stat = await fs.stat(this.#localDir);
-    } catch (e) {
+    } catch {
       await fs.mkdir(this.#localDir, { recursive: true });
-      this.#initComplete = true;
+      return;
     }
-    if (stat) {
-      if (!stat.isDirectory()) {
-        throw new Error(
-          `Specified path ${this.#localDir} exists but is not a directory`
-        );
-      } else {
-        await this.#loadIndex();
-        this.#initComplete = true;
-      }
+    if (!stat.isDirectory()) {
+      throw new Error(
+        `Specified path ${this.#localDir} exists but is not a directory`,
+      );
+    }
+    await this.#loadIndex();
+  }
+
+  protected init(): Promise<void> {
+    // memoized so that concurrent first calls do not load the index more than once
+    this.#initialized ??= this.#initialize();
+    return this.#initialized;
+  }
+
+  protected getKeyPath(key: string): string {
+    if (INVALID_KEY_CHARACTERS.test(key) || key === INDEX_KEY) {
+      throw new Error(
+        `Invalid key "${key}": keys cannot contain '/', '\\' or null characters, or be '${INDEX_KEY}'`,
+      );
+    }
+    return path.join(this.#localDir, `${key}${KEY_FILE_EXTENSION}`);
+  }
+
+  protected resolveKey(key: string): string {
+    return this.#indexMap.get(key) ?? key;
+  }
+
+  protected getCached(key: string): Type | undefined {
+    const cached = this.#cache?.get(key);
+    return cached === undefined ? undefined : (JSON.parse(cached) as Type);
+  }
+
+  protected setCached(key: string, value: Type): void {
+    const serialized = JSON.stringify(value) as string | undefined;
+    if (serialized === undefined) {
+      this.#cache?.delete(key);
+    } else {
+      this.#cache?.set(key, serialized);
     }
   }
 
-  #getKeyFromFile(fileName: string) {
-    return fileName.replace(".json", "");
+  protected async readJson<Data>(key: string): Promise<Data | undefined> {
+    try {
+      const fileData = await fs.readFile(this.getKeyPath(key), "utf8");
+      return JSON.parse(fileData) as Data;
+    } catch {
+      // the key does not exist, or is not a valid key
+      return undefined;
+    }
+  }
+
+  protected async writeJson(key: string, data: unknown): Promise<void> {
+    await fs.writeFile(this.getKeyPath(key), JSON.stringify(data));
+  }
+
+  /**
+   * Returns the latest value stored against `key`, without resolving indices.
+   * Versioned partitions override this to read the latest version.
+   */
+  protected async getLatest(key: string): Promise<Type | undefined> {
+    const cached = this.getCached(key);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const value = await this.readJson<Type>(key);
+    if (value !== undefined) {
+      this.setCached(key, value);
+    }
+    return value;
   }
 
   async keys(): Promise<string[]> {
     await this.init();
-    const files = await fs.readdir(this.#localDir);
+    const files = await fs.readdir(this.#localDir, { withFileTypes: true });
     return files
-      .filter((each) => each !== INDEX_FILE)
-      .map(this.#getKeyFromFile);
+      .filter(
+        (file) =>
+          file.isFile() &&
+          file.name.endsWith(KEY_FILE_EXTENSION) &&
+          file.name !== INDEX_FILE,
+      )
+      .map((file) => file.name.slice(0, -KEY_FILE_EXTENSION.length))
+      .sort();
   }
 
-  protected getKeyPath(key: string): string {
-    return `${this.#localDir}/${key}.json`;
-  }
-
-  protected resolveKey(key: string) {
-    return this.#indexMap[key] ?? key;
+  async #isStored(key: string): Promise<boolean> {
+    if (this.#cache?.has(key)) {
+      return true;
+    }
+    try {
+      const stat = await fs.stat(this.getKeyPath(key));
+      return stat.isFile();
+    } catch {
+      return false;
+    }
   }
 
   async exists(key: string): Promise<boolean> {
     await this.init();
-    const resolvedKey = this.resolveKey(key);
-    if (this.cache?.has(resolvedKey)) {
-      return Promise.resolve(true);
-    }
-    const keyPath = this.getKeyPath(resolvedKey);
-    try {
-      const stat = await fs.stat(keyPath);
-      if (stat && stat.isFile()) {
-        return Promise.resolve(true);
-      } else {
-        return Promise.resolve(false);
+    return this.#isStored(this.resolveKey(key));
+  }
+
+  async get(key: string): Promise<Type | undefined> {
+    await this.init();
+    return this.getLatest(this.resolveKey(key));
+  }
+
+  async data(): Promise<Record<string, Type>> {
+    const data: Record<string, Type> = {};
+    for (const key of await this.keys()) {
+      const value = await this.getLatest(key);
+      if (value !== undefined) {
+        data[key] = value;
       }
-    } catch (e) {
-      // console.log(
-      //   `Could not stat file at ${keyPath} due to error ${e}. Its likely that this key does not exist.`
-      // );
-      return Promise.resolve(false);
-    }
-  }
-
-  async get(key: string): Promise<Type> {
-    await this.init();
-    const resolvedKey = this.resolveKey(key);
-    const cachedData = this.cache?.get(resolvedKey);
-    if (cachedData) {
-      return Promise.resolve(cachedData);
-    }
-    const keyPath = this.getKeyPath(resolvedKey);
-    try {
-      const fileData = await fs.readFile(keyPath, {
-        encoding: "utf8",
-      });
-      const parsed = JSON.parse(fileData);
-      this.cache?.set(resolvedKey, parsed);
-      return Promise.resolve(parsed);
-    } catch (e) {
-      // console.log(
-      //   `Could not read file at ${keyPath} due to error ${e}. Its likely that this key does not exist.`
-      // );
-      return Promise.resolve(undefined);
-    }
-  }
-
-  async data(): Promise<{ [key: string]: Type }> {
-    await this.init();
-    const keys = await this.keys();
-    const data = {};
-    for (const key of keys) {
-      data[key] = await this.get(key);
     }
     return data;
   }
 
-  protected async setIndices(key: string, value: Type): Promise<boolean> {
-    if (this.#indices?.length) {
-      for (const indexPattern of this.#indices) {
-        const index = lget(value, indexPattern);
-        if (index !== undefined) {
-          this.#indexMap["" + index] = key;
-        }
-      }
-      await this.#flushIndex();
-      return Promise.resolve(true);
+  protected async setIndices(key: string, value: Type): Promise<void> {
+    if (!this.#indices.length) {
+      return;
     }
-    return Promise.resolve(false);
+    for (const indexPattern of this.#indices) {
+      const index = toKey(getByPath(value, indexPattern));
+      if (index !== undefined) {
+        this.#indexMap.set(index, key);
+      }
+    }
+    await this.#flushIndex();
   }
 
-  protected async deleteIndices(value: Type) {
-    if (this.#indices?.length) {
-      for (const indexPattern of this.#indices) {
-        const index = lget(value, indexPattern);
-        delete this.#indexMap[index];
-      }
-      await this.#flushIndex();
-      return Promise.resolve(true);
+  protected async deleteIndices(key: string, value: Type): Promise<void> {
+    if (!this.#indices.length) {
+      return;
     }
-    return Promise.resolve(false);
+    for (const indexPattern of this.#indices) {
+      const index = toKey(getByPath(value, indexPattern));
+      // another key may have claimed this index since, leave it alone if so
+      if (index !== undefined && this.#indexMap.get(index) === key) {
+        this.#indexMap.delete(index);
+      }
+    }
+    await this.#flushIndex();
   }
 
   async set(key: string, value: Type): Promise<boolean> {
     await this.init();
     try {
-      if (await this.exists(key)) {
-        await this.deleteIndices(await this.get(key));
+      const serialized = JSON.stringify(value);
+      const previous = await this.getLatest(key);
+      await fs.writeFile(this.getKeyPath(key), serialized);
+      if (previous !== undefined) {
+        await this.deleteIndices(key, previous);
       }
-      await fs.writeFile(this.getKeyPath(key), JSON.stringify(value));
       await this.setIndices(key, value);
-      this.cache?.set(key, value);
-      return Promise.resolve(true);
+      this.#cache?.set(key, serialized);
+      return true;
     } catch (error) {
-      console.log(`Error setting value for key: ${key}, due to error ${error}`);
-      return Promise.resolve(false);
+      console.error(
+        `Error setting value for key: ${key}, due to error ${String(error)}`,
+      );
+      return false;
     }
   }
 
   async delete(key: string): Promise<boolean> {
     await this.init();
     const resolvedKey = this.resolveKey(key);
-    const value = await this.get(resolvedKey);
-    this.cache?.del(resolvedKey);
-    if (value) {
-      try {
-        await fs.rm(this.getKeyPath(resolvedKey));
-        await this.deleteIndices(value);
-        return Promise.resolve(true);
-      } catch (e) {
-        console.log(
-          `Error deleting key ${resolvedKey}, received exception ${e}`
-        );
-        return Promise.resolve(false);
-      }
+    if (!(await this.#isStored(resolvedKey))) {
+      return false;
     }
-    return Promise.resolve(false);
+    try {
+      const value = await this.getLatest(resolvedKey);
+      this.#cache?.delete(resolvedKey);
+      await fs.rm(this.getKeyPath(resolvedKey));
+      if (value !== undefined) {
+        await this.deleteIndices(resolvedKey, value);
+      }
+      return true;
+    } catch (error) {
+      console.error(
+        `Error deleting key ${resolvedKey}, received exception ${String(error)}`,
+      );
+      return false;
+    }
   }
 
   createJoin(
@@ -261,48 +321,46 @@ export default class GlitchPartitionImpl<Type>
     db: string,
     joinName: string,
     leftKey: string,
-    rightKey?: string
+    rightKey?: string,
   ): void {
     if (!db || !joinName || !leftKey) {
       throw new Error(
-        `'db', 'joinName' and 'leftKey' arguments cannot be falsy`
+        `'db', 'joinName' and 'leftKey' arguments cannot be falsy`,
       );
     }
-    this.#joins[joinName] = {
-      db,
-      joinName: joinName,
-      leftKey,
-      rightKey,
-    };
+    this.#joins.set(joinName, { db, joinName, leftKey, rightKey });
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async getWithJoins(key: string): Promise<any> {
-    await this.init();
-    const resolvedKey = this.resolveKey(key);
-    if (!Object.keys(this.#joins)?.length) {
+  async getWithJoins<Joined = Record<string, unknown>>(
+    key: string,
+  ): Promise<Joined | undefined> {
+    if (!this.#joins.size) {
       throw new Error(
-        `No joins defined. Please create a join using 'createJoin' api.`
+        `No joins defined. Please create a join using 'createJoin' api.`,
       );
     }
-    const leftData = await this.get(resolvedKey);
+    const leftData = (await this.get(key)) as
+      Record<string, unknown> | undefined;
     if (leftData === undefined) {
-      return Promise.resolve(undefined);
+      return undefined;
     }
-    const joinedData = {};
-    for (const rightKey of Object.keys(this.#joins)) {
-      const joiner = this.#joins[rightKey];
-      const db = this.#master.getPartitionByName(joiner.db);
-      let rightData;
-      if (joiner.rightKey) {
-        rightData = Object.values(await db.data()).find(
-          (each) => leftData[joiner.leftKey] === each[joiner.rightKey]
+    const joinedData: Record<string, unknown> = {};
+    for (const { db, joinName, leftKey, rightKey } of this.#joins.values()) {
+      const partition =
+        this.#master.getPartitionByName<Record<string, unknown>>(db);
+      const leftValue = leftData[leftKey];
+      if (rightKey) {
+        joinedData[joinName] = Object.values(await partition.data()).find(
+          (rightData) => leftValue === rightData?.[rightKey],
         );
       } else {
-        rightData = await db.get(leftData[joiner.leftKey]);
+        const rightPartitionKey = toKey(leftValue);
+        joinedData[joinName] =
+          rightPartitionKey === undefined
+            ? undefined
+            : await partition.get(rightPartitionKey);
       }
-      joinedData[joiner.joinName] = rightData;
     }
-    return Promise.resolve({ ...joinedData, ...leftData });
+    return { ...joinedData, ...leftData } as Joined;
   }
 }

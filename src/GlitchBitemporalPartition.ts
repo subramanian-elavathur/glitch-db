@@ -1,10 +1,10 @@
-import * as fs from "fs/promises";
-import { UnitemporalVersion } from "./GlitchUnitemporalPartition";
-import GlitchPartitionImpl, { GlitchPartition } from "./GlitchPartition";
-import { INFINITY_TIME } from "./constants";
-import GlitchDB from ".";
+import { INFINITY_TIME } from "./constants.ts";
+import GlitchPartitionImpl, {
+  type GlitchPartition,
+} from "./GlitchPartition.ts";
+import type { UnitemporalVersion } from "./GlitchUnitemporalPartition.ts";
 
-interface BitemporalVersion extends UnitemporalVersion {
+export interface BitemporalVersion extends UnitemporalVersion {
   validFrom: number;
   validTo: number;
 }
@@ -19,102 +19,91 @@ interface BitemporallyVersioned<Type> {
 
 // todo caching
 export interface GlitchBitemporalPartition<Type> extends GlitchPartition<Type> {
-  get: (key: string, validAsOf?: number) => Promise<Type>;
+  get: (key: string, validAsOf?: number) => Promise<Type | undefined>;
   set: (
     key: string,
     value: Type,
     validFrom?: number,
     validTo?: number,
-    metadata?: { [key: string]: string }
+    metadata?: Record<string, string>,
   ) => Promise<boolean>;
   getVersion: (
     key: string,
-    validAsOf?: number
-  ) => Promise<BitemporallyVersionedData<Type>>;
-  getAllVersions: (key: string) => Promise<BitemporallyVersionedData<Type>[]>;
+    validAsOf?: number,
+  ) => Promise<BitemporallyVersionedData<Type> | undefined>;
+  getAllVersions: (
+    key: string,
+  ) => Promise<BitemporallyVersionedData<Type>[] | undefined>;
 }
 
-export default class GlitchBiTemporalPartitionImpl<Type>
+/**
+ * Finds the live version valid at `validAsOf`, or the open ended (latest)
+ * version when `validAsOf` is not specified. At most one version can match.
+ */
+const findVersion = <Type>(
+  file: BitemporallyVersioned<Type> | undefined,
+  validAsOf?: number,
+): BitemporallyVersionedData<Type> | undefined => {
+  const asOf = validAsOf ?? INFINITY_TIME;
+  return file?.data.find(
+    (each) =>
+      each.deletedAt === INFINITY_TIME &&
+      each.validFrom <= asOf &&
+      ((asOf === INFINITY_TIME && each.validTo === INFINITY_TIME) ||
+        asOf < each.validTo),
+  );
+};
+
+export default class GlitchBitemporalPartitionImpl<Type>
   extends GlitchPartitionImpl<Type>
   implements GlitchBitemporalPartition<Type>
 {
-  constructor(
-    master: GlitchDB,
-    localDir: string,
-    cacheSize?: number,
-    indices?: string[]
-  ) {
-    super(master, localDir, cacheSize, indices);
+  #getVersionedData(
+    key: string,
+  ): Promise<BitemporallyVersioned<Type> | undefined> {
+    return this.readJson<BitemporallyVersioned<Type>>(key);
   }
 
-  async get(key: string, validAsOf?: number): Promise<Type> {
-    const data = await this.getVersion(key, validAsOf);
-    return data ? Promise.resolve(data.data) : Promise.resolve(undefined);
+  protected override async getLatest(key: string): Promise<Type | undefined> {
+    return findVersion(await this.#getVersionedData(key))?.data;
   }
 
-  async #getVersionedData(key: string): Promise<BitemporallyVersioned<Type>> {
-    const resolvedKey = this.resolveKey(key);
-    const keyPath = this.getKeyPath(resolvedKey);
-    try {
-      const fileData = await fs.readFile(keyPath, {
-        encoding: "utf8",
-      });
-      const parsed = JSON.parse(fileData) as BitemporallyVersioned<Type>;
-      return Promise.resolve(parsed);
-    } catch (e) {
-      // console.log(
-      //   `Could not read file at ${keyPath} due to error ${e}. Its likely that this key does not exist.`
-      // );
-      return Promise.resolve(undefined);
-    }
+  override async get(
+    key: string,
+    validAsOf?: number,
+  ): Promise<Type | undefined> {
+    return (await this.getVersion(key, validAsOf))?.data;
   }
 
   async getVersion(
     key: string,
-    validAsOf?: number
-  ): Promise<BitemporallyVersionedData<Type>> {
+    validAsOf?: number,
+  ): Promise<BitemporallyVersionedData<Type> | undefined> {
     await this.init();
-    const fileData = await this.#getVersionedData(key);
-    const validFrom = validAsOf ?? INFINITY_TIME;
-    if (fileData) {
-      const required = fileData.data.filter((each) => {
-        return (
-          each.deletedAt === INFINITY_TIME &&
-          each.validFrom <= validFrom &&
-          ((validFrom === INFINITY_TIME && each.validTo === INFINITY_TIME) ||
-            validFrom < each.validTo)
-        );
-      });
-      if (required?.length) {
-        return Promise.resolve(required[0]); // returns only the first element as more than one elements are not allowed
-      } else {
-        return Promise.resolve(undefined);
-      }
-    } else {
-      return Promise.resolve(undefined);
-    }
+    return findVersion(
+      await this.#getVersionedData(this.resolveKey(key)),
+      validAsOf,
+    );
   }
 
   async getAllVersions(
-    key: string
-  ): Promise<BitemporallyVersionedData<Type>[]> {
+    key: string,
+  ): Promise<BitemporallyVersionedData<Type>[] | undefined> {
     await this.init();
-    const data = await this.#getVersionedData(key);
-    return Promise.resolve(data?.data);
+    return (await this.#getVersionedData(this.resolveKey(key)))?.data;
   }
 
   // todo caching
-  async set(
+  override async set(
     key: string,
     value: Type,
     validFrom?: number,
     validTo?: number,
-    metadata?: { [key: string]: string }
+    metadata?: Record<string, string>,
   ): Promise<boolean> {
     await this.init();
     try {
-      let data = await this.#getVersionedData(key);
-      const currentTime = new Date().valueOf();
+      const currentTime = Date.now();
       const newValidFrom = validFrom ?? currentTime;
       const newValidTo = validTo ?? INFINITY_TIME;
 
@@ -122,65 +111,58 @@ export default class GlitchBiTemporalPartitionImpl<Type>
         throw new Error("Valid To cannot be less than or equal to Valid From");
       }
 
-      if (!data?.data?.length) {
-        data = {
-          data: [
-            {
-              data: value,
-              createdAt: currentTime,
-              deletedAt: INFINITY_TIME,
-              validFrom: newValidFrom,
-              validTo: newValidTo,
-              metadata,
-            },
-          ],
-        };
-        await fs.writeFile(this.getKeyPath(key), JSON.stringify(data));
-        await this.setIndices(key, value);
-      } else {
-        let rowValidBeforeCurrentRow: BitemporallyVersionedData<Type>;
-        data.data = data.data.map((row) => {
-          const updatedRow = { ...row };
-          // todo - this logic has 3 buckets
-          // inside span of existing row
-          // leading edge conflict with existing row
-          // trailing edge conflict with existing row
-          if (row.validFrom <= newValidFrom && row.validTo > newValidFrom) {
-            updatedRow.deletedAt = currentTime;
-            rowValidBeforeCurrentRow = row;
-          } else if (
-            newValidFrom <= row.validFrom &&
-            newValidTo > row.validFrom
-          ) {
-            updatedRow.deletedAt = currentTime;
-          }
-          return updatedRow;
-        });
+      const file = (await this.#getVersionedData(key)) ?? { data: [] };
+      const previousLatest = findVersion(file)?.data;
 
-        if (rowValidBeforeCurrentRow) {
-          data.data.push({
-            ...rowValidBeforeCurrentRow,
-            validTo: newValidFrom,
-          });
+      // every live version that overlaps the new validity period is superseded, while
+      // the parts of it that fall outside the new period are carried over as new versions
+      const remainders: BitemporallyVersionedData<Type>[] = [];
+      for (const row of file.data) {
+        const overlaps =
+          row.deletedAt === INFINITY_TIME &&
+          row.validFrom < newValidTo &&
+          newValidFrom < row.validTo;
+        if (!overlaps) {
+          continue;
         }
-
-        data.data.push({
-          data: value,
+        row.deletedAt = currentTime;
+        const carriedOver = {
+          ...row,
           createdAt: currentTime,
           deletedAt: INFINITY_TIME,
-          validFrom: newValidFrom,
-          validTo: newValidTo,
-          metadata,
-        });
-
-        await fs.writeFile(this.getKeyPath(key), JSON.stringify(data));
-        await this.deleteIndices(await this.get(key));
-        await this.setIndices(key, value);
+        };
+        if (row.validFrom < newValidFrom) {
+          remainders.push({ ...carriedOver, validTo: newValidFrom });
+        }
+        if (newValidTo < row.validTo) {
+          remainders.push({ ...carriedOver, validFrom: newValidTo });
+        }
       }
-      return Promise.resolve(true);
+
+      file.data.push(...remainders, {
+        data: value,
+        createdAt: currentTime,
+        deletedAt: INFINITY_TIME,
+        validFrom: newValidFrom,
+        validTo: newValidTo,
+        metadata,
+      });
+
+      await this.writeJson(key, file);
+      // indices always point at the latest version, which a historical update leaves untouched
+      if (previousLatest !== undefined) {
+        await this.deleteIndices(key, previousLatest);
+      }
+      const latest = findVersion(file)?.data;
+      if (latest !== undefined) {
+        await this.setIndices(key, latest);
+      }
+      return true;
     } catch (error) {
-      console.log(`Error setting value for key: ${key}, due to error ${error}`);
-      return Promise.resolve(false);
+      console.error(
+        `Error setting value for key: ${key}, due to error ${String(error)}`,
+      );
+      return false;
     }
   }
 }

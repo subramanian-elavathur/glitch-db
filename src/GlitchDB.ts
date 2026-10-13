@@ -1,50 +1,63 @@
-import * as tar from "tar";
-import { DEFAULT_CACHE_SIZE } from "./constants";
-import GlitchPartitionImpl, { GlitchPartition } from "./GlitchPartition";
-import GlitchUniTemporalPartitionImpl, {
-  GlitchUnitemporalPartition,
-} from "./GlitchUnitemporalPartition";
-import GlitchBiTemporalPartitionImpl, {
-  GlitchBitemporalPartition,
-} from "./GlitchBitemporalPartition";
+import * as path from "node:path";
+import { create as createTarball } from "tar";
+import { DEFAULT_CACHE_SIZE } from "./constants.ts";
+import GlitchPartitionImpl, {
+  type GlitchPartition,
+} from "./GlitchPartition.ts";
+import GlitchUnitemporalPartitionImpl, {
+  type GlitchUnitemporalPartition,
+} from "./GlitchUnitemporalPartition.ts";
+import GlitchBitemporalPartitionImpl, {
+  type GlitchBitemporalPartition,
+} from "./GlitchBitemporalPartition.ts";
 
 export default class GlitchDB {
-  #baseDir: string;
-  #defaultCacheSize?: number;
-  #partitions: {
-    [key: string]: {
-      name: string;
-      cache: number;
-      versioned: boolean;
-    };
-  };
+  readonly #baseDir: string;
+  readonly #defaultCacheSize: number;
+  readonly #partitions = new Map<string, unknown>();
 
+  /**
+   * @param baseDir directory used to store all data and metadata
+   * @param defaultCacheSize number of keys cached per partition, set to `0` to disable caching
+   */
   constructor(baseDir: string, defaultCacheSize?: number) {
     this.#baseDir = baseDir;
     this.#defaultCacheSize = defaultCacheSize ?? DEFAULT_CACHE_SIZE;
-    this.#partitions = {};
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  getPartitionByName(name: string): GlitchPartition<any> {
-    if (name in this.#partitions) {
-      const partition = this.#partitions[name];
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return this.getPartition<any>(partition.name, null, partition.cache);
+  #register<Partition>(name: string, partition: Partition): Partition {
+    this.#partitions.set(name, partition);
+    return partition;
+  }
+
+  #partitionDir(name: string): string {
+    return path.join(this.#baseDir, name);
+  }
+
+  /**
+   * Returns the partition most recently created with `name` by any of the `get*Partition` methods.
+   */
+  getPartitionByName<Type = unknown>(name: string): GlitchPartition<Type> {
+    const partition = this.#partitions.get(name);
+    if (partition === undefined) {
+      throw new Error(`Glitch Partition with name ${name} not found`);
     }
-    throw new Error(`Glitch Partition with name ${name} not found`);
+    return partition as GlitchPartition<Type>;
   }
 
+  /**
+   * Creates a gzipped tarball of the database inside `outputDirectory` and returns its path.
+   */
   backup(outputDirectory: string): string {
-    const fileLocation = `${outputDirectory}/backup-${new Date().getTime()}.tgz`;
-    tar.create(
+    const fileLocation = path.join(outputDirectory, `backup-${Date.now()}.tgz`);
+    createTarball(
       {
         gzip: true,
         sync: true,
         cwd: this.#baseDir,
         file: fileLocation,
       },
-      ["."]
+      ["."],
     );
     return fileLocation;
   }
@@ -52,57 +65,48 @@ export default class GlitchDB {
   getPartition<Type>(
     name: string,
     indices?: string[],
-    cacheSize?: number
+    cacheSize?: number,
   ): GlitchPartition<Type> {
-    const cacheSizeWithDefault = cacheSize ?? this.#defaultCacheSize;
-    this.#partitions[name] = {
+    return this.#register(
       name,
-      cache: cacheSizeWithDefault,
-      versioned: false,
-    };
-    return new GlitchPartitionImpl<Type>(
-      this,
-      `${this.#baseDir}/${name}`,
-      cacheSizeWithDefault,
-      indices
+      new GlitchPartitionImpl<Type>(
+        this,
+        this.#partitionDir(name),
+        cacheSize ?? this.#defaultCacheSize,
+        indices,
+      ),
     );
   }
 
   getVersionedPartition<Type>(
     name: string,
     indices?: string[],
-    cacheSize?: number
+    cacheSize?: number,
   ): GlitchUnitemporalPartition<Type> {
-    const cacheSizeWithDefault = cacheSize ?? this.#defaultCacheSize;
-    this.#partitions[name] = {
+    return this.#register(
       name,
-      cache: cacheSizeWithDefault,
-      versioned: true,
-    };
-    return new GlitchUniTemporalPartitionImpl<Type>(
-      this,
-      `${this.#baseDir}/${name}`,
-      cacheSizeWithDefault,
-      indices
+      new GlitchUnitemporalPartitionImpl<Type>(
+        this,
+        this.#partitionDir(name),
+        cacheSize ?? this.#defaultCacheSize,
+        indices,
+      ),
     );
   }
 
   getBitemporalPartition<Type>(
     name: string,
     indices?: string[],
-    cacheSize?: number
+    cacheSize?: number,
   ): GlitchBitemporalPartition<Type> {
-    const cacheSizeWithDefault = cacheSize ?? this.#defaultCacheSize;
-    this.#partitions[name] = {
+    return this.#register(
       name,
-      cache: cacheSizeWithDefault,
-      versioned: true,
-    };
-    return new GlitchBiTemporalPartitionImpl<Type>(
-      this,
-      `${this.#baseDir}/${name}`,
-      cacheSizeWithDefault,
-      indices
+      new GlitchBitemporalPartitionImpl<Type>(
+        this,
+        this.#partitionDir(name),
+        cacheSize ?? this.#defaultCacheSize,
+        indices,
+      ),
     );
   }
 }

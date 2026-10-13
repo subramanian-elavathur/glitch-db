@@ -1,7 +1,17 @@
-import GlitchDB from "./GlitchDB";
+import GlitchDB from "./GlitchDB.ts";
 
-export { GlitchPartition } from "./GlitchPartition";
-export { GlitchUnitemporalPartition } from "./GlitchUnitemporalPartition";
-export { GlitchBitemporalPartition } from "./GlitchBitemporalPartition";
+export type { GlitchPartition } from "./GlitchPartition.ts";
+export type {
+  GlitchUnitemporalPartition,
+  UnitemporalVersion,
+  UnitemporallyVersionedData,
+} from "./GlitchUnitemporalPartition.ts";
+export type {
+  GlitchBitemporalPartition,
+  BitemporalVersion,
+  BitemporallyVersionedData,
+} from "./GlitchBitemporalPartition.ts";
+export { INFINITY_TIME } from "./constants.ts";
 
+export { GlitchDB };
 export default GlitchDB;
