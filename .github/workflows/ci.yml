@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm run lint:package
+      - name: Smoke test the built package
+        run: |
+          node --input-type=module --eval "import GlitchDB from 'glitch-db'; if (typeof GlitchDB !== 'function') process.exit(1);"
+          node --eval "const { GlitchDB, default: d } = require('glitch-db'); if (typeof GlitchDB !== 'function' || d !== GlitchDB) process.exit(1);"
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # See supported Node.js release schedule at https://nodejs.org/en/about/previous-releases
+        node-version: [22.x, 24.x, 26.x]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - run: npm ci
+      - run: npm run test:coverage
+      - uses: codecov/codecov-action@v7
+        if: matrix.node-version == '24.x'
+        with:
+          files: lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
