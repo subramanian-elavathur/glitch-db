@@ -7,7 +7,6 @@ dist/
 
 # Test coverage
 coverage/
-lcov.info
 
 # Output of 'npm pack'
 *.tgz

@@ -1,6 +1,6 @@
 # glitch-db
 
-[![CI](https://github.com/subramanian-elavathur/glitch-db/actions/workflows/ci.yml/badge.svg)](https://github.com/subramanian-elavathur/glitch-db/actions/workflows/ci.yml) [![codecov](https://codecov.io/gh/subramanian-elavathur/glitch-db/branch/main/graph/badge.svg?token=6XHJ42X7ZR)](https://codecov.io/gh/subramanian-elavathur/glitch-db) [![npm-version](https://img.shields.io/npm/v/glitch-db?color=blue)](https://www.npmjs.com/package/glitch-db)
+[![CI](https://github.com/subramanian-elavathur/glitch-db/actions/workflows/ci.yml/badge.svg)](https://github.com/subramanian-elavathur/glitch-db/actions/workflows/ci.yml) [![npm-version](https://img.shields.io/npm/v/glitch-db?color=blue)](https://www.npmjs.com/package/glitch-db)
 
 A simple, JSON file backed, key-value database with support for versioning, audit trails (unitemporal and bitemporal), indices, caching and joins. Written in TypeScript, so your data stays typed.
 
